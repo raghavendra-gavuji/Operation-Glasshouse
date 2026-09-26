@@ -8,6 +8,7 @@ export interface ServerConfig {
   root: string;
   host: string;
   port: number;
+  publicOrigin?: string;
   production: boolean;
   apiKey: string;
   models: { text: string; live: string; image: string; tts: string };
@@ -48,6 +49,15 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, root = projectR
   if (!["127.0.0.1", "::1", "localhost"].includes(host)) {
     throw new Error("Operation Glasshouse only supports a loopback HOST.");
   }
+  const publicOrigin = values.PUBLIC_ORIGIN?.trim() || undefined;
+  if (publicOrigin) {
+    let parsedOrigin: URL;
+    try { parsedOrigin = new URL(publicOrigin); }
+    catch { throw new Error("PUBLIC_ORIGIN must be an exact HTTPS origin."); }
+    if (parsedOrigin.protocol !== "https:" || parsedOrigin.origin !== publicOrigin || parsedOrigin.username || parsedOrigin.password) {
+      throw new Error("PUBLIC_ORIGIN must be an exact HTTPS origin.");
+    }
+  }
   const model = (name: string, fallback: string) => {
     const value = values[name] || fallback;
     if (!/^[a-zA-Z0-9._-]{1,120}$/.test(value)) throw new Error(`Invalid ${name} model identifier.`);
@@ -57,6 +67,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, root = projectR
     root,
     host,
     port,
+    publicOrigin,
     production: values.NODE_ENV === "production",
     apiKey: (values.GEMINI_API_KEY || "").trim(),
     models: {

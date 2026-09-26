@@ -37,7 +37,7 @@ export interface GlasshouseServer {
 }
 
 export function localRequestAllowed(
-  headers: IncomingHttpHeaders, remoteAddress: string | undefined, port: number, requireOrigin = false,
+  headers: IncomingHttpHeaders, remoteAddress: string | undefined, port: number, requireOrigin = false, publicOrigin?: string,
 ): boolean {
   if (!remoteAddress || !["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(remoteAddress)) return false;
   const host = headers.host?.toLowerCase();
@@ -48,7 +48,7 @@ export function localRequestAllowed(
   if (fetchSite && fetchSite !== "same-origin" && fetchSite !== "none") return false;
   const origin = headers.origin;
   if (requireOrigin && !origin) return false;
-  return origin === undefined || origin.toLowerCase() === expectedOrigin;
+  return origin === undefined || origin.toLowerCase() === expectedOrigin || origin.toLowerCase() === publicOrigin;
 }
 
 function publicError(error: unknown): ServiceError {
@@ -94,7 +94,7 @@ export async function createGlasshouseServer(options: GlasshouseServerOptions = 
   };
 
   app.use((request, response, next) => {
-    if (!localRequestAllowed(request.headers, request.socket.remoteAddress, actualPort())) {
+    if (!localRequestAllowed(request.headers, request.socket.remoteAddress, actualPort(), false, config.publicOrigin)) {
       next(new ServiceError(403, "LOCAL_ORIGIN_REQUIRED", "Use this server's loopback URL from the same browser origin."));
       return;
     }
@@ -207,7 +207,7 @@ export async function createGlasshouseServer(options: GlasshouseServerOptions = 
       }
       return;
     }
-    if (shuttingDown || request.method !== "GET" || !localRequestAllowed(request.headers, request.socket.remoteAddress, actualPort(), true)) {
+    if (shuttingDown || request.method !== "GET" || !localRequestAllowed(request.headers, request.socket.remoteAddress, actualPort(), true, config.publicOrigin)) {
       socket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
       return;
     }

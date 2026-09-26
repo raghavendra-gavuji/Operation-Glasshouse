@@ -101,6 +101,8 @@ describe("configuration, request schemas and budgets", () => {
       const selected = loadConfig({ GLASSHOUSE_ENV_FILE: path.join(root, "selected.env") }, root);
       expect(selected.port).toBe(4320);
       expect(Boolean(selected.apiKey)).toBe(true);
+      expect(loadConfig({ PUBLIC_ORIGIN: "https://glasshouse.example" }, root).publicOrigin).toBe("https://glasshouse.example");
+      expect(() => loadConfig({ PUBLIC_ORIGIN: "http://glasshouse.example" }, root)).toThrow("exact HTTPS origin");
       expect(() => loadConfig({ GLASSHOUSE_ENV_FILE: path.join(root, "missing.env") }, root)).toThrow("environment file");
       expect(() => loadConfig({ HOST: "0.0.0.0" }, root)).toThrow("loopback");
     } finally { await rm(root, { recursive: true, force: true }); }
@@ -118,6 +120,8 @@ describe("configuration, request schemas and budgets", () => {
   it("requires a literal loopback Host and the exact browser origin", () => {
     expect(localRequestAllowed({ host: "127.0.0.1:4317", origin: "http://127.0.0.1:4317" }, "127.0.0.1", 4317, true)).toBe(true);
     expect(localRequestAllowed({ host: "[::1]:4317", origin: "http://[::1]:4317" }, "::1", 4317, true)).toBe(true);
+    expect(localRequestAllowed({ host: "127.0.0.1:4317", origin: "https://glasshouse.example" }, "127.0.0.1", 4317, true, "https://glasshouse.example")).toBe(true);
+    expect(localRequestAllowed({ host: "127.0.0.1:4317", origin: "https://other.example" }, "127.0.0.1", 4317, true, "https://glasshouse.example")).toBe(false);
     for (const headers of [
       { host: "attacker.example:4317" }, { host: "localhost:99999" }, { host: "localhost:4317", origin: "null" },
       { host: "localhost:4317", origin: "http://localhost:9999" },
