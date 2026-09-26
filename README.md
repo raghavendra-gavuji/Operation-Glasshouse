@@ -59,7 +59,7 @@ Return to the entrance on floor 1 with the card. Mr. Kulkarni on floor 3 knows t
 
 The office day runs from 09:00 to 18:00 over approximately 24 minutes of active simulation. Pause stops it; hiding the tab opens pause rather than silently advancing the game. Meera's security call has a separate fair response allowance that does not count connection, model, or speech-playback waits.
 
-The five outcomes are **Clean**, **Flagged**, **Burned**, **Clock-out**, and **Double-cross**. The report explains the actual outcome and preserves exact recorded claims, transcripts, witnesses, and delivered rumors. Its Amateur-to-Phantom assessment describes the fictional operation, not the player.
+The five outcomes are **Clean**, **Flagged**, **Burned**, **Clock-out**, and **Double-cross**. Leaving early without a card, after confirmation, abandons the job as a Clock-out; the report distinguishes that choice from reaching closing time. The report preserves exact recorded claims, transcripts, witnesses, and delivered rumors. Its Amateur-to-Phantom assessment describes the fictional operation, not the player.
 
 ### Practice mode
 
@@ -75,6 +75,7 @@ Use the contextual conversation choices for a complete non-AI route. You can als
 - Use fictional callback codes such as `SIM-0420`, not real telephone numbers.
 - **There is no lie detector.** NPC suspicion is a fictional interpretation of story claims, witnessed behavior, and delivered gossip. It does not measure real honesty, facial expressions, gaze, accent, disability, emotions, or speaking speed.
 - Browser permissions belong to the browser. You can revoke microphone/camera permission in its site settings.
+- Explicit microphone retries reuse the unlocked audio context. The camera is released on the mission report, return to title, or reset.
 
 ## Architecture
 
@@ -111,6 +112,16 @@ npm.cmd run build
 ```
 
 The tests cover the deterministic engine and endings, provider validation, artwork integrity, screen-relative input, exact live transcript assembly, practice options, and single-flight director behavior. `npm run build` produces the browser bundle in `dist`; it does not bundle the server `.env`.
+
+To serve that production build instead of Vite middleware:
+
+```powershell
+$env:NODE_ENV = "production"
+$env:PORT = "4317"
+npm.cmd start
+```
+
+The exact HTTP/WebSocket contracts, bounded provider behavior, and opt-in real-API smoke commands are documented in [`server\README.md`](server/README.md). The complete simulation and persistence contract is in [`src\game\README.md`](src/game/README.md).
 
 For browser checks, the development build exposes a **read-only** `window.__glasshouse` inspection object: copied state, floor plans, character definitions, and UI status. It has no gameplay setters and is removed from production builds. Stable `data-testid` attributes identify the actual start, dialogue, lift, pause, mission, and report controls.
 

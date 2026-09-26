@@ -13,6 +13,7 @@ FORM: User-pinned immersive isometric diorama, not a generated template or conce
     <meta name="theme-color" content="#182c29" />
     <meta name="description" content="A fictional, voice-driven social-stealth game inside Meridian Tower. One cover identity. Twelve floors. Five ways out." />
     <title>Operation Glasshouse</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="stylesheet" href="/src/styles.css" />
   </head>
   <body>
@@ -145,6 +146,12 @@ FORM: User-pinned immersive isometric diorama, not a generated template or conce
         <h2 id="pause-title">Out of office.</h2><p>The building can wait. Your mission clock is paused.</p>
         <button id="resume-play" class="button button-jade">Back to the mission <span aria-hidden="true">↗</span></button>
         <button id="pause-save" class="text-button">Save and return to title</button>
+      </dialog>
+
+      <dialog id="exit-dialog" class="paper-dialog pause-dialog" aria-labelledby="exit-title">
+        <h2 id="exit-title">Leave empty-handed?</h2><p>The keycard is still inside. Leaving now abandons this assignment and ends the mission.</p>
+        <button id="confirm-exit" class="button button-burgundy">Abandon the assignment</button>
+        <button data-close="exit-dialog" class="text-button">Stay in the tower</button>
       </dialog>
 
       <section id="mission-report" class="mission-report" aria-labelledby="report-title" hidden>

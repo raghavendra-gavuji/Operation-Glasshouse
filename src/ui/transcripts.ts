@@ -1,3 +1,17 @@
+export function narrationChunks(text: string): string[] {
+  const chunks: string[] = [];
+  let remaining = text.trim();
+  while (remaining.length > 1100) {
+    let split = remaining.lastIndexOf(" ", 1100);
+    if (split < 550) split = 1100;
+    if (/[\uD800-\uDBFF]/.test(remaining[split - 1])) split -= 1;
+    chunks.push(remaining.slice(0, split).trim());
+    remaining = remaining.slice(split).trimStart();
+  }
+  if (remaining) chunks.push(remaining);
+  return chunks;
+}
+
 export class TranscriptAssembler {
   private pending: Record<"player" | "npc", string> = { player: "", npc: "" };
   private lastFinal: Record<"player" | "npc", string> = { player: "", npc: "" };

@@ -78,19 +78,11 @@ export function practiceOptions(state: GameState, npc: NpcDefinition): PracticeO
       actions: [{ type: "security_resolution", npcId: id, result: "warning", reason: "The visitor accepts a warning and agrees to correct their fictional paperwork." }],
     });
     options.push({
-      id: "security-burned", label: "Admit the cover is invented",
-      text: "The identity is invented. I came here under false pretenses.",
-      reply: "Then this visit ends here. Stay where you are.",
-      actions: [{ type: "security_resolution", npcId: id, result: "burned", reason: "The visitor explicitly admits the fictional cover identity is invented." }],
+      id: "security-record", label: "Ask Meera to decide from the records",
+      text: "Please decide from the statements and reports you actually have.",
+      reply: "I will compare the documented reports.",
+      actions: [{ type: "security_resolution", npcId: id, result: "warning", reason: "The visitor asks for an assessment of the documented game evidence." }],
     });
-    if (state.secretKnown) {
-      options.push({
-        id: "security-secret", label: "Tell Meera about the Handler",
-        text: "Mr. Kulkarni recalls someone with my Handler's instructions meeting a representative of Ashoka Capital.",
-        reply: "That changes the conversation. I will handle the Handler.",
-        actions: [{ type: "security_resolution", npcId: id, result: "double_cross", reason: "The visitor discloses the discovered Handler evidence." }],
-      });
-    }
   } else {
     options.push({
       id: "staff-smalltalk", label: "Ask about the office",
@@ -102,7 +94,7 @@ export function practiceOptions(state: GameState, npc: NpcDefinition): PracticeO
   if (name && id !== "meera") {
     const alternate = name === "Leela Menon" ? "Arjun Rao" : "Leela Menon";
     const option = introduction(id, alternate, state.cover.company || "Aster Systems");
-    options.push({ ...option, id: "change-story", label: `Risk a different story: ${alternate}`, reply: `Wait. ${alternate}? That is not the name I was expecting.`, actions: [...option.actions, { type: "suspicion", npcId: id, delta: 18, reason: "The visitor deliberately changes the name in their cover story.", evidence: option.text }] });
+    options.push({ ...option, id: "change-story", label: `Risk a different story: ${alternate}`, reply: `Wait. ${alternate}? That is not the name I was expecting.` });
   }
   options.push({ id: "leave", label: "Thanks. I'll let you get back to it.", text: "Thanks. I'll let you get back to it.", reply: "All right. See you around.", actions: [{ type: "end_conversation", npcId: id, summary: "The visitor politely concludes this conversation after discussing their visit." }] });
   return options;

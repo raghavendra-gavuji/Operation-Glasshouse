@@ -113,4 +113,42 @@ describe("complete practice choices against real engine gates", () => {
     expect(result.accepted, result.message).toBe(true);
     expect(engine.state.ending).toBe("double-cross");
   });
+
+  it("reaches flagged after two observed name changes even when the final paperwork matches", () => {
+    const engine = new GameEngine(44);
+    engine.start(true);
+    visit(engine, "priya");
+    choose(engine, "introduce-arjun-rao");
+    choose(engine, "change-story");
+    choose(engine, "change-story");
+    choose(engine, "register");
+    choose(engine, "leave");
+    authorizeByDev(engine);
+    collect(engine);
+    exitPosition(engine);
+    engine.exitBuilding();
+    expect(engine.state.ending).toBe("flagged");
+  });
+
+  it("reaches burned from repeated documented contradictions, not a selected model verdict", () => {
+    const engine = new GameEngine(45);
+    engine.start(true);
+    visit(engine, "priya");
+    choose(engine, "introduce-arjun-rao");
+    for (let index = 0; index < 6; index += 1) choose(engine, "change-story");
+    choose(engine, "leave");
+    for (let index = 0; index < 40 && engine.state.activeNpcId !== "meera"; index += 1) engine.tick(.25, { x: 0, y: 0 });
+    expect(engine.state.activeNpcId).toBe("meera");
+    choose(engine, "security-warning");
+    expect(engine.state.ending).toBe("burned");
+  });
+
+  it("allows a deliberate early departure without inventing a sixth ending", () => {
+    const engine = new GameEngine(46);
+    engine.start(true);
+    exitPosition(engine);
+    engine.exitBuilding();
+    expect(engine.state.ending).toBe("clock-out");
+    expect(engine.state.clockMinute).toBeLessThan(1080);
+  });
 });

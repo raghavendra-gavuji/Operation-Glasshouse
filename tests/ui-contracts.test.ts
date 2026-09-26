@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { screenToWorldInput } from "../src/ui/controls";
 import { clockLabel, escapeHtml, missionRank } from "../src/ui/mission";
 import { practiceOptions, practiceText } from "../src/ui/practice";
-import { TranscriptAssembler } from "../src/ui/transcripts";
+import { narrationChunks, TranscriptAssembler } from "../src/ui/transcripts";
+import { apiErrorMessage, readApiError } from "../src/ui/http";
 import { projectTile } from "../src/renderer";
 import type { GameState, NpcDefinition } from "../shared/types";
 
@@ -41,6 +42,16 @@ describe("screen-relative isometric movement", () => {
 });
 
 describe("exact live transcripts", () => {
+  it("speaks long replies in bounded chunks without dropping words or splitting Unicode pairs", () => {
+    const message = "A sentence about the visitor's paperwork. ".repeat(38);
+    const chunks = narrationChunks(message);
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks.every((chunk) => chunk.length <= 1100)).toBe(true);
+    expect(chunks.join(" ")).toBe(message.trim());
+    const unicode = "🚪".repeat(700);
+    expect(narrationChunks(unicode).join("")).toBe(unicode);
+    expect(narrationChunks(unicode).every((chunk) => !/[\uD800-\uDBFF]$/.test(chunk))).toBe(true);
+  });
   it("replaces cumulative and corrected interim snapshots", () => {
     const assembler = new TranscriptAssembler();
     assembler.receive("player", "I am an audtor", false);
@@ -103,6 +114,20 @@ describe("practice UI action contract", () => {
         }
       }
     }
+  });
+
+  it("never offers an incoming-call shortcut for the exit-only double cross", () => {
+    const value = state();
+    value.secretKnown = true;
+    expect(practiceOptions(value, npc("meera")).flatMap((option) => option.actions).some((action) => action.type === "security_resolution" && action.result === "double_cross")).toBe(false);
+  });
+});
+
+describe("real backend error envelopes", () => {
+  it("shows the server's sanitized, actionable error message", async () => {
+    expect(apiErrorMessage({ error: { code: "PROVIDER_QUOTA", message: "Gemini quota exhausted.", retryable: true } }, 429)).toBe("Gemini quota exhausted.");
+    expect(apiErrorMessage({ error: "Legacy test error" }, 503)).toBe("Legacy test error");
+    expect(await readApiError(new Response("not JSON", { status: 502 }))).toBe("The server returned HTTP 502 without a readable error response.");
   });
 });
 

@@ -1,4 +1,5 @@
 import type { DirectorContext, DirectorReply } from "../../shared/types";
+import { readApiError } from "./http";
 
 interface DirectorOptions {
   context: () => DirectorContext;
@@ -66,9 +67,7 @@ export class DirectorLoop {
         signal: controller.signal,
       });
       if (!response.ok) {
-        const body: unknown = await response.json().catch(() => null);
-        const detail = body && typeof body === "object" && "error" in body && typeof body.error === "string" ? body.error : `HTTP ${response.status}`;
-        throw new Error(detail);
+        throw new Error(await readApiError(response));
       }
       const reply: unknown = await response.json();
       if (!isDirectorReply(reply)) throw new Error("Gemini returned an invalid director response.");

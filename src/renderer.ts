@@ -127,13 +127,14 @@ export class OfficeRenderer {
     for (const object of objects) object.draw();
     this.drawLiftSign(floor);
     for (const npc of activeNpcs) this.drawPersonLabel(npc, definitions.find((item) => item.id === npc.id), state);
-    if (!state.activeNpcId) {
-      const ghost = projectTile(state.player.x, state.player.y);
-      ctx.fillStyle = light;
-      ctx.font = "bold 5px 'Segoe UI', sans-serif";
-      ctx.textAlign = "center";
-      ctx.fillText("GHOST", Math.round(ghost.x), Math.round(ghost.y + 12));
-    }
+    const ghost = projectTile(state.player.x, state.player.y);
+    ctx.fillStyle = light;
+    this.polygon(ctx, [{ x: ghost.x, y: ghost.y + 6 }, { x: ghost.x - 3, y: ghost.y + 10 }, { x: ghost.x + 3, y: ghost.y + 10 }], light);
+    ctx.fillRect(Math.round(ghost.x - 15), Math.round(ghost.y + 10), 30, 10);
+    ctx.fillStyle = ink;
+    ctx.font = "bold 6px 'Segoe UI', sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("GHOST", Math.round(ghost.x), Math.round(ghost.y + 17));
     ctx.restore();
     this.drawVignette();
   }
@@ -312,7 +313,14 @@ export class OfficeRenderer {
       return;
     }
     if (kind === "door") {
-      this.diamond(ctx, point.x, point.y, TILE_W - 1, TILE_H - 1, "#c1a262");
+      const blueDoor = floor.id === 7 && floor.rooms.some((room) => room.id === "server-room" && x >= room.x && x < room.x + room.width && y >= room.y && y < room.y + room.height);
+      this.diamond(ctx, point.x, point.y, TILE_W - 1, TILE_H - 1, blueDoor ? "#5487b6" : "#c1a262");
+      if (blueDoor) {
+        ctx.fillStyle = "#487daf";
+        ctx.fillRect(Math.round(point.x - 9), Math.round(point.y - 20), 3, 26);
+        ctx.fillRect(Math.round(point.x + 7), Math.round(point.y - 28), 3, 26);
+        this.polygon(ctx, [{ x: point.x - 9, y: point.y - 20 }, { x: point.x + 10, y: point.y - 29 }, { x: point.x + 10, y: point.y - 25 }, { x: point.x - 9, y: point.y - 16 }], "#6fa0c7");
+      }
       ctx.fillStyle = "#e3cca0";
       ctx.fillRect(Math.round(point.x - 1), Math.round(point.y - 2), 2, 3);
     }
@@ -353,6 +361,8 @@ export class OfficeRenderer {
       ctx.stroke();
     }
     const sprite = this.art.image(`sprite-${npc.id}`) ?? (!ghost ? this.art.image(`sprite-${["dev", "ramesh", "priya", "anita", "kulkarni"][hash(npc.id) % 5]}`) : undefined);
+    const opacity = ctx.globalAlpha;
+    if (!ghost && Math.hypot(npc.x - state.player.x, npc.y - state.player.y) < .9) ctx.globalAlpha = .58;
     if (sprite) {
       const height = ghost ? 45 : 42;
       const width = height * sprite.naturalWidth / sprite.naturalHeight;
@@ -372,6 +382,7 @@ export class OfficeRenderer {
     } else {
       this.drawPixelPerson(point.x, point.y + bob, definition?.color ?? (ghost ? "#69454a" : "#5e8162"), ghost, npc.facing === "west", gait);
     }
+    ctx.globalAlpha = opacity;
     if (ghost && state.player.carryingCard) {
       ctx.fillStyle = "#f9de9c";
       ctx.fillRect(Math.round(point.x + 9), Math.round(point.y - 22 + bob), 4, 6);

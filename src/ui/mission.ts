@@ -1,4 +1,5 @@
 import type { Ending, GameState } from "../../shared/types";
+import { GAME_DAY_SECONDS, GAME_END_MINUTE, GAME_START_MINUTE } from "../game/engine";
 
 export function clockLabel(minute: number): string {
   const value = Math.max(0, Math.floor(minute));
@@ -6,7 +7,7 @@ export function clockLabel(minute: number): string {
 }
 
 export function eventClock(elapsedSeconds: number): string {
-  return clockLabel(9 * 60 + elapsedSeconds * (9 * 60 / (24 * 60)));
+  return clockLabel(GAME_START_MINUTE + elapsedSeconds * ((GAME_END_MINUTE - GAME_START_MINUTE) / GAME_DAY_SECONDS));
 }
 
 export function escapeHtml(value: string | number): string {

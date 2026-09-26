@@ -1,15 +1,15 @@
 import type { ActionResult, DialogueReply, Ending, GameAction, GameEvent, GameState, NpcDefinition, VoiceStatus } from "../shared/types";
 import { HANDLER_BRIEFING } from "../shared/story";
 import { VoiceClient } from "./audio";
-import { GameEngine } from "./game/engine";
-import { findPath } from "./game/navigation";
+import { GameEngine, GAME_END_MINUTE, normalizeAlias } from "./game/engine";
 import { OfficeRenderer } from "./renderer";
 import { ArtCache } from "./ui/assets";
 import { MovementInput, isTextTarget } from "./ui/controls";
 import { DirectorLoop } from "./ui/director";
+import { readApiError } from "./ui/http";
 import { ENDING_COPY, clockLabel, escapeHtml, eventClock, fieldLabel, missionRank } from "./ui/mission";
 import { practiceOptions, practiceText, type PracticeOption } from "./ui/practice";
-import { TranscriptAssembler } from "./ui/transcripts";
+import { narrationChunks, TranscriptAssembler } from "./ui/transcripts";
 
 const SAVE_KEY = "glasshouse.mission.v1";
 const get = <T extends HTMLElement = HTMLElement>(id: string): T => {
@@ -77,7 +77,7 @@ const voice = new VoiceClient({
     const result = applyGameAction(action);
     voice.respondToTool(requestId, result);
     if (conversationId) voice.updateContext(engine.getConversationContext(conversationId));
-    if (result.accepted && action.type === "end_conversation") waitForFarewell();
+    if (result.accepted && !engine.state.activeNpcId && conversationId) waitForFarewell();
   },
   onTurnComplete() {
     finishTranscriptTurn();
@@ -91,13 +91,13 @@ const voice = new VoiceClient({
     if (!started || intentionalDisconnect) return;
     debug(`Voice · error · ${message}`);
     showProviderError(`Gemini voice: ${message} You can continue by typing, or retry the connection.`);
-    if (conversationId && !pendingEnd) {
+    if (conversationId && !pendingEnd && transport === "live") {
       transport = "text";
       busy = false;
       updateVoiceStatus();
     }
   },
-  onClose(reason) {
+  onClose() {
     if (intentionalDisconnect || !conversationId) return;
     if (pendingEnd) {
       closeConversation();
@@ -105,7 +105,7 @@ const voice = new VoiceClient({
     }
     transport = "text";
     busy = false;
-    showProviderError(`Voice connection closed: ${reason || "connection ended"}. Typed Gemini replies remain available.`);
+    showProviderError("The Gemini voice connection ended. Typed Gemini replies remain available.");
     updateVoiceStatus();
   },
 });
@@ -142,6 +142,7 @@ art.onChange = () => {
 art.onError = (message) => {
   text("art-status", `Art loading: ${message}`);
   debug(`Artwork · ${message}`);
+  if (started) announce(`Artwork unavailable: ${message}`);
 };
 void art.load();
 void checkProvider();
@@ -243,9 +244,13 @@ function bindInterface(): void {
   });
   get("elevator-button").addEventListener("click", () => openElevator());
   get("exit-button").addEventListener("click", () => {
-    const priorPhase = engine.state.phase;
+    if (!engine.canExit) return;
+    if (!engine.state.player.carryingCard) openModal("exit-dialog");
+    else engine.exitBuilding();
+  });
+  get("confirm-exit").addEventListener("click", () => {
+    closeModal("exit-dialog");
     engine.exitBuilding();
-    if (priorPhase === engine.state.phase) announce("You need the visitor keycard before you can complete this exit.");
   });
   get("double-cross-button").addEventListener("click", () => {
     const result = engine.callMeeraForDoubleCross();
@@ -447,6 +452,7 @@ async function startConversation(npcId: string): Promise<void> {
   updateVoiceStatus();
   await audioPreparation;
   if (conversationId !== npcId || version !== encounterVersion || activeModal) return;
+  voice.setMuted(microphoneMuted);
   if (!voice.micEnabled) {
     await beginTextConversation(npc, version);
     return;
@@ -514,21 +520,24 @@ async function sendReply(value: string): Promise<void> {
       body: JSON.stringify({ context: engine.getConversationContext(npcId), text: value }),
       signal: controller.signal,
     });
-    if (!response.ok) throw new Error(await responseError(response));
+    if (!response.ok) throw new Error(await readApiError(response));
     const result: unknown = await response.json();
     if (!isDialogueReply(result)) throw new Error("Gemini returned an invalid dialogue response.");
     if (version !== encounterVersion || conversationId !== npcId) return;
     debug(`Gemini dialogue · ${Math.round(performance.now() - requestedAt)} ms · ${npc.name}`);
     for (const action of result.actions) {
       const applied = applyGameAction(action);
-      if (applied.accepted && action.type === "end_conversation") pendingEnd = true;
+      if (applied.accepted && !engine.state.activeNpcId) pendingEnd = true;
     }
     text("npc-caption", result.reply);
     renderer.setSpeech(npcId, result.reply);
     recordTranscript("npc", result.reply);
     if (pendingEnd) syncPause();
     try {
-      await voice.playNarration(result.reply, npc.voiceName);
+      for (const chunk of narrationChunks(result.reply)) {
+        if (version !== encounterVersion) break;
+        await voice.playNarration(chunk, npc.voiceName);
+      }
     } catch (error) {
       if (version === encounterVersion) showProviderError(`Gemini speech unavailable: ${errorMessage(error)} The reply is still shown in captions.`);
     }
@@ -567,12 +576,16 @@ function runPracticeOption(option: PracticeOption): void {
   text("player-caption", option.text);
   const results = option.actions.map((action) => applyGameAction(action));
   const rejected = results.find((result) => !result.accepted);
-  const reply = rejected ? rejected.message : option.reply;
+  const securityResolved = npcId === "meera" && !engine.state.activeNpcId;
+  const reply = rejected ? rejected.message : securityResolved
+    ? engine.state.ending === "burned" ? "The reports show repeated contradictions. This visit ends here, Ghost."
+      : "One warning. The records do not justify ending your visit. Keep the paperwork consistent."
+    : option.reply;
   text("npc-caption", reply);
   renderer.setSpeech(npcId, reply);
   recordTranscript("npc", reply);
   debug(`Practice · scripted option · ${option.id}`);
-  if (!rejected && option.actions.some((action) => action.type === "end_conversation")) {
+  if (!rejected && !engine.state.activeNpcId) {
     pendingEnd = true;
     syncPause();
     clearTimeout(closeTimer);
@@ -601,6 +614,7 @@ function renderPracticeOptions(): void {
 
 function waitForFarewell(): void {
   pendingEnd = true;
+  voice.setMuted(true);
   engine.setConversationWaiting(true);
   syncPause();
   text("voice-status", "Finishing conversation…");
@@ -658,7 +672,7 @@ function updateVoiceStatus(): void {
   engine.setConversationWaiting(!canAnswer);
   get<HTMLInputElement>("dialogue-input").disabled = !conversationId || busy || pendingEnd;
   get<HTMLButtonElement>("send-reply").disabled = !conversationId || busy || pendingEnd;
-  text("mic-button", voice.micEnabled ? microphoneMuted ? "Turn microphone on" : "Mute microphone" : "Enable microphone");
+  text("mic-button", microphoneMuted ? "Unmute microphone" : voice.micEnabled ? "Mute microphone" : "Enable microphone");
   updateConnection();
 }
 
@@ -671,7 +685,7 @@ function updateConnection(): void {
 
 async function toggleMicrophone(): Promise<void> {
   if (!conversationId) return;
-  if (voice.micEnabled && transport === "live") {
+  if ((voice.micEnabled || microphoneMuted) && transport === "live" && voiceStatus !== "idle" && voiceStatus !== "error") {
     microphoneMuted = !microphoneMuted;
     voice.setMuted(microphoneMuted);
     updateVoiceStatus();
@@ -714,7 +728,7 @@ async function retryProvider(): Promise<void> {
 }
 
 function switchToPractice(): void {
-  engine.state.practiceMode = true;
+  engine.enablePracticeMode();
   encounterVersion += 1;
   textController?.abort();
   busy = false;
@@ -771,6 +785,7 @@ function disconnectVoice(): void {
 
 function openModal(id: string): void {
   if (activeModal === id) return;
+  if (pendingEnd) closeConversation();
   if (activeModal) get<HTMLDialogElement>(activeModal).close();
   activeModal = id;
   input.clear();
@@ -798,7 +813,7 @@ function closeModal(id: string): void {
   syncPause();
   if (conversationId && pausedTransport && !engine.state.practiceMode) {
     pausedTransport = false;
-    if (transport === "live" && voice.micEnabled) {
+    if (transport === "live") {
       intentionalDisconnect = false;
       void voice.connect(engine.getConversationContext(conversationId)).then(() => voice.setMuted(microphoneMuted)).catch((error: unknown) => {
         transport = "text";
@@ -897,11 +912,15 @@ function emptyLedger(message: string): string {
 function showReport(ending: Ending): void {
   director.stop();
   input.clear();
+  voice.setMuted(true);
+  disableCamera();
   saveMission();
   show("mission-report", true);
   for (const id of ["topbar", "dossier", "movement-hint", "touch-controls", "conversation", "security-overlay", "nearby-actions", "provider-banner"]) show(id, false);
   document.body.classList.remove("security", "in-conversation");
-  const copy = ENDING_COPY[ending];
+  const copy = ending === "clock-out" && engine.state.clockMinute < GAME_END_MINUTE
+    ? { title: "You walked away.", description: "No keycard. No job. Ghost leaves the assignment unfinished, while the tower carries on without them." }
+    : ENDING_COPY[ending];
   text("report-title", copy.title);
   text("report-description", copy.description);
   text("report-rank", missionRank(engine.state));
@@ -931,12 +950,13 @@ function updateHud(): void {
     get(id).classList.toggle("complete", complete);
     get(id).setAttribute("aria-label", `${get(id).innerText.replace(/\n/g, " ")}: ${complete ? "complete" : "not complete"}`);
   }
-  text("mission-hint", state.player.carryingCard ? "Card in hand. The way out is through Reception on floor 1." : state.visitorLog && state.authorization && state.visitorLog.toLocaleLowerCase() !== state.authorization.name.toLocaleLowerCase() ? "The names don't match. Correct the paperwork before collection." : state.authorization ? "Take the same identity to Ramesh on floor 2." : "The same name needs to appear on both pieces of paper.");
+  text("mission-hint", state.player.carryingCard ? "Card in hand. The way out is through Reception on floor 1." : state.visitorLog && state.authorization && normalizeAlias(state.visitorLog) !== normalizeAlias(state.authorization.name) ? "The names don't match. Correct the paperwork before collection." : state.authorization ? "Take the same identity to Ramesh on floor 2." : "The same name needs to appear on both pieces of paper.");
   const nearby = started && !conversationId && !activeModal && state.phase === "playing";
   show("elevator-button", nearby && engine.canUseElevator);
-  show("exit-button", nearby && engine.canExit && state.player.carryingCard);
+  show("exit-button", nearby && engine.canExit);
+  text("exit-button", state.player.carryingCard ? "Leave the building" : "Leave without a keycard");
   show("double-cross-button", nearby && engine.canExit && state.secretKnown);
-  show("nearby-actions", nearby && (engine.canUseElevator || engine.canExit && (state.player.carryingCard || state.secretKnown)));
+  show("nearby-actions", nearby && (engine.canUseElevator || engine.canExit));
   if (conversationId) {
     const suspicion = state.npcs.find((npc) => npc.id === conversationId)?.suspicion ?? 0;
     const meter = get<HTMLMeterElement>("suspicion-meter");
@@ -1073,6 +1093,7 @@ function returnToTitle(): void {
     engine.endConversation("The visitor pauses the operation.");
     closeConversation();
   }
+  disableCamera();
   saveMission();
   director.stop();
   disconnectVoice();
@@ -1082,7 +1103,9 @@ function returnToTitle(): void {
   for (const id of ["topbar", "dossier", "movement-hint", "touch-controls", "nearby-actions", "conversation", "security-overlay", "mission-report", "provider-banner"]) show(id, false);
   show("opening", true);
   show("resume-button", !!savedMission);
+  const preferences = { ...engine.state.settings, camera: false };
   engine = new GameEngine();
+  engine.state.settings = preferences;
   bindEngine();
   renderer.center();
 }
@@ -1092,14 +1115,24 @@ function resetEngine(): void {
   if (conversationId) closeConversation();
   director.stop();
   disconnectVoice();
+  disableCamera();
   if (activeModal) get<HTMLDialogElement>(activeModal).close();
   activeModal = null;
   started = false;
+  const preferences = { ...engine.state.settings, camera: false };
   engine = new GameEngine();
+  engine.state.settings = preferences;
   bindEngine();
   renderer.center();
   encounterVersion += 1;
   lastStateSignature = "";
+}
+
+function disableCamera(): void {
+  engine.state.settings.camera = false;
+  get<HTMLInputElement>("camera-input").checked = false;
+  text("camera-status", "Camera off. No facial analysis or honesty scoring.");
+  void voice.setCameraEnabled(false).catch((error: unknown) => announce(`Camera could not be closed: ${errorMessage(error)}`));
 }
 
 function eraseProgress(): void {
@@ -1134,10 +1167,10 @@ function frame(now: number): void {
       autosaveAt = now;
     }
     if (renderer.debug && now - lastPaths > 1000) {
-      const floor = engine.floors.find((item) => item.id === engine.state.floor);
-      if (floor) {
-        renderer.setPaths(Object.fromEntries(engine.state.npcs.filter((npc) => npc.floor === engine.state.floor).map((npc) => [npc.id, findPath(floor, npc, engine.state.player)])));
-      }
+      renderer.setPaths(Object.fromEntries(Object.entries(engine.getDebugPaths()).map(([id, path]) => {
+        const npc = engine.state.npcs.find((actor) => actor.id === id);
+        return [id, npc && path.length ? [{ x: npc.x, y: npc.y }, ...path] : []];
+      })));
       lastPaths = now;
     }
   }
@@ -1167,16 +1200,6 @@ function installTestInspection(): void {
       configurable: false,
     });
   }
-}
-
-async function responseError(response: Response): Promise<string> {
-  try {
-    const body: unknown = await response.json();
-    if (body && typeof body === "object" && "error" in body && typeof body.error === "string") return body.error;
-  } catch {
-    return `The server returned HTTP ${response.status} without a readable error response.`;
-  }
-  return `The server returned HTTP ${response.status}.`;
 }
 
 function errorMessage(error: unknown): string {
