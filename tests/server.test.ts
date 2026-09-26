@@ -395,6 +395,30 @@ describe("Live bridge lifecycle and tool acknowledgements", () => {
     expect(emitted.some(message => message.type === "error" && message.message.includes("three-minute"))).toBe(true);
     expect(stub.session.close).toHaveBeenCalledOnce();
   });
+
+  it("times out an opened upstream socket that never acknowledges setup", async () => {
+    const stub = stubService();
+    const emitted: ServerLiveMessage[] = [];
+    const bridge = new LiveBridge(stub.service, message => emitted.push(message), vi.fn(), { setupTimeoutMs: 20 });
+    bridges.push(bridge);
+    bridge.receive({ type: "start", context: context() });
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(21);
+    expect(bridge.closed).toBe(true);
+    expect(stub.session.close).toHaveBeenCalledOnce();
+    stub.parameters.callbacks.onmessage(modelMessage({ setupComplete: {} }));
+    expect(emitted.some(message => message.type === "ready")).toBe(false);
+  });
+
+  it.each([
+    { data: "AAAA####", mimeType: "audio/pcm;rate=24000" },
+    { data: Buffer.alloc(640).toString("base64"), mimeType: "audio/pcm;rate=24000;channels=2" },
+  ])("rejects malformed provider audio instead of forwarding it", async inlineData => {
+    const { bridge, stub, emitted } = await setup();
+    stub.parameters.callbacks.onmessage(modelMessage({ serverContent: { modelTurn: { parts: [{ inlineData }] } } }));
+    expect(bridge.closed).toBe(true);
+    expect(emitted.some(message => message.type === "audio")).toBe(false);
+  });
 });
 
 describe("loopback HTTP and WebSocket API", () => {
@@ -459,6 +483,16 @@ describe("loopback HTTP and WebSocket API", () => {
     expect((await post(base, "/api/director", directorContext())).status).toBe(429);
     pending.resolve(directorReply);
     expect((await first).status).toBe(200);
+  });
+
+  it("bounds asynchronous asset reads as well as paid requests", async () => {
+    const pending = deferred<Awaited<ReturnType<AssetService["readAssets"]>>>();
+    const read = vi.spyOn(assets, "readAssets").mockReturnValue(pending.promise);
+    const requests = Array.from({ length: limits.maxRequests }, () => fetch(`${base}/api/assets`));
+    await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(limits.maxRequests));
+    expect((await fetch(`${base}/api/assets`)).status).toBe(429);
+    pending.resolve({ version: 1, assets: [], status: "empty" });
+    expect((await Promise.all(requests)).every(response => response.status === 200)).toBe(true);
   });
 
   it("propagates browser request cancellation to the provider", async () => {

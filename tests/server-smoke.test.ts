@@ -72,13 +72,16 @@ describe.skipIf(!enabled)("explicitly authorized real Gemini API smoke", () => {
     expect(tickBody.source).toBe("gemini");
     expect(Array.isArray(tickBody.intents)).toBe(true);
     const dialogue = await post("/api/dialogue", {
-      context: conversation(), text: "Hello. I am looking at the fictional office directory. Ask me one short question; do not change any visitor records yet.",
+      context: conversation(),
+      text: "For this fictional game my invented name is Nila. Remember that explicit name claim, then ask one short question. Do not register, authorize, or issue anything.",
     });
     const dialogueBody = await dialogue.json();
     expect(dialogue.status, JSON.stringify(dialogueBody.error)).toBe(200);
     expect(dialogueBody.reply.length).toBeGreaterThan(0);
     expect(Array.isArray(dialogueBody.actions)).toBe(true);
-    console.info(JSON.stringify({ smoke: "flash-rest", directorIntents: tickBody.intents.length, dialogueCharacters: dialogueBody.reply.length }));
+    expect(dialogueBody.actions.some((action: { type: string; field?: string; npcId: string; value?: string }) =>
+      action.type === "claim" && action.field === "name" && action.npcId === "priya" && action.value === "Nila")).toBe(true);
+    console.info(JSON.stringify({ smoke: "flash-rest", directorIntents: tickBody.intents.length, dialogueCharacters: dialogueBody.reply.length, dialogueActions: dialogueBody.actions.length }));
   }, 120_000);
 
   it("returns distinct WAV voices and reuses the bounded narration cache", async () => {

@@ -392,6 +392,16 @@ describe("VoiceClient browser audio lifecycle", () => {
     expect(onError).toHaveBeenCalledOnce();
   });
 
+  it("measures WebSocket bounds in UTF-8 bytes rather than JavaScript characters", async () => {
+    const voice = client();
+    await voice.prepare();
+    const socket = await connect(voice);
+    voice.updateContext({ ...context(), memory: "\u20ac".repeat(140_000) });
+    expect(voice.status).toBe("error");
+    expect(socket.sent.some(message => message.type === "context")).toBe(false);
+    expect(microphone.track.enabled).toBe(false);
+  });
+
   it("times out setup without reconnecting and ignores late open events", async () => {
     const voice = client();
     await voice.prepare();

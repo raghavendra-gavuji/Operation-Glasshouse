@@ -40,7 +40,7 @@ function isAction(value: unknown): value is GameAction {
 }
 
 function parseServerMessage(raw: unknown): ServerLiveMessage {
-  if (typeof raw !== "string" || raw.length > 768 * 1024) throw new Error("The voice server sent an invalid or oversized message.");
+  if (typeof raw !== "string" || new TextEncoder().encode(raw).byteLength > 768 * 1024) throw new Error("The voice server sent an invalid or oversized message.");
   const value: unknown = JSON.parse(raw);
   if (record(value)) {
     switch (value.type) {
@@ -389,7 +389,7 @@ export class VoiceClient {
       return false;
     }
     const encoded = JSON.stringify(message);
-    if (encoded.length > 384 * 1024) {
+    if (new TextEncoder().encode(encoded).byteLength > 384 * 1024) {
       this.failConnection("The live message exceeded the local size limit.");
       return false;
     }

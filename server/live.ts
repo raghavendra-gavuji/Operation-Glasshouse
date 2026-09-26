@@ -304,9 +304,11 @@ export class LiveBridge {
         }
         if (part.inlineData) {
           const { data, mimeType } = part.inlineData;
-          if (!data || data.length > 512 * 1024 || !mimeType || !/^audio\/(?:pcm|l16)(?:;.*)?$/i.test(mimeType)) throw invalidResponse();
-          const rate = /(?:^|;)\s*rate=(\d+)/i.exec(mimeType);
-          if (rate && Number(rate[1]) !== 24_000) throw invalidResponse();
+          if (!data || data.length > 512 * 1024 || !mimeType
+            || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(data)) throw invalidResponse();
+          const [mime, ...parameters] = mimeType.toLowerCase().split(";").map(value => value.trim());
+          if (!["audio/pcm", "audio/l16"].includes(mime)
+            || parameters.some(value => !["rate=24000", "channels=1"].includes(value))) throw invalidResponse();
           const bytes = Buffer.from(data, "base64");
           if (!bytes.length || bytes.length % 2) throw invalidResponse();
           this.emit({ type: "audio", data, sampleRate: 24_000 });
