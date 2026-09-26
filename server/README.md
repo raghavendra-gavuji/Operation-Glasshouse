@@ -2,6 +2,8 @@
 
 `server\index.ts` is the Express/HTTP/WebSocket entry point used by `npm run dev` and `npm start`. It binds to `127.0.0.1:4317` by default. `HOST` accepts loopback addresses only; `PORT` selects the port. Browser API and WebSocket requests must use the server's exact origin. A separate browser-facing Gemini credential is neither used nor returned.
 
+If the port is occupied, the CLI reports `PORT_IN_USE`, closes only its own newly created Vite/WebSocket/HTTP resources, and exits with status 1. It never stops the existing listener. Reuse that server, stop it explicitly, or select another `PORT`.
+
 Use an untracked local `.env`, or set `GLASSHOUSE_ENV_FILE` to a private dotenv file. Existing process variables take precedence. `GEMINI_API_KEY` stays in the server process; never give it a `VITE_` prefix. Model overrides are `GEMINI_TEXT_MODEL`, `GEMINI_LIVE_MODEL`, `GEMINI_IMAGE_MODEL`, and `GEMINI_TTS_MODEL`; defaults are respectively `gemini-3.8-flash`, `gemini-3.8-live`, `gemini-3.1-flash-lite-image`, and `gemini-3.8-flash-tts`.
 
 Development uses Vite middleware. Production (`NODE_ENV=production`) serves `dist` when built, with SPA fallback only for non-API GET requests. Generated artwork is served from `public\generated` independently of a rebuild. If `dist` is absent, the server uses Vite instead.

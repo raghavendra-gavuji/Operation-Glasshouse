@@ -264,26 +264,31 @@ export async function createGlasshouseServer(options: GlasshouseServerOptions = 
     });
   });
 
-  if (options.web !== false) {
-    app.use("/generated", express.static(path.join(config.root, "public", "generated"), {
-      dotfiles: "deny", index: false, fallthrough: false,
-      setHeaders: (response, filename) => response.setHeader("Cache-Control", filename.endsWith("manifest.json") ? "no-store" : "public, max-age=31536000, immutable"),
-    }));
-    const dist = path.join(config.root, "dist");
-    if (!config.production || !existsSync(path.join(dist, "index.html"))) {
-      const { createServer: createViteServer } = await import("vite");
-      vite = await createViteServer({
-        root: config.root, appType: "spa",
-        server: {
-          middlewareMode: true, hmr: { server },
-          fs: { strict: true, allow: [config.root], deny: [".env", ".env.*", "**/*.env", "*.{crt,pem}", "**/.git/**", "**/server/**"] },
-        },
-      });
-      app.use(vite.middlewares);
-    } else {
-      app.use(express.static(dist, { dotfiles: "deny", index: false }));
-      app.get("*", (_request, response) => response.sendFile(path.join(dist, "index.html")));
+  try {
+    if (options.web !== false) {
+      app.use("/generated", express.static(path.join(config.root, "public", "generated"), {
+        dotfiles: "deny", index: false, fallthrough: false,
+        setHeaders: (response, filename) => response.setHeader("Cache-Control", filename.endsWith("manifest.json") ? "no-store" : "public, max-age=31536000, immutable"),
+      }));
+      const dist = path.join(config.root, "dist");
+      if (!config.production || !existsSync(path.join(dist, "index.html"))) {
+        const { createServer: createViteServer } = await import("vite");
+        vite = await createViteServer({
+          root: config.root, appType: "spa",
+          server: {
+            middlewareMode: true, hmr: { server },
+            fs: { strict: true, allow: [config.root], deny: [".env", ".env.*", "**/*.env", "*.{crt,pem}", "**/.git/**", "**/server/**"] },
+          },
+        });
+        app.use(vite.middlewares);
+      } else {
+        app.use(express.static(dist, { dotfiles: "deny", index: false }));
+        app.get("*", (_request, response) => response.sendFile(path.join(dist, "index.html")));
+      }
     }
+  } catch (error) {
+    try { await close(); } catch (cleanupError) { safeLog("startup-cleanup", cleanupError); }
+    throw error;
   }
   app.use((_request, _response, next) => next(new ServiceError(404, "NOT_FOUND", "The requested resource does not exist.")));
   const errorHandler: ErrorRequestHandler = (error: unknown, _request, response, _next) => {
@@ -312,32 +317,46 @@ export async function createGlasshouseServer(options: GlasshouseServerOptions = 
         server.listen(config.port, config.host);
       });
     },
-    async close() {
-      if (shuttingDown) return;
-      shuttingDown = true;
-      for (const controller of requests) controller.abort();
-      for (const bridge of bridges) bridge.stop("The game server is shutting down.", 1001);
-      const forceClose = setTimeout(() => { for (const peer of wss.clients) peer.terminate(); }, 1000);
-      try {
-        await Promise.all([
-          vite?.close(),
-          new Promise<void>(resolve => wss.close(() => resolve())),
-          new Promise<void>((resolve, reject) => {
-            if (!server.listening) return resolve();
-            server.close(error => error ? reject(error) : resolve());
-            server.closeAllConnections();
-          }),
-        ]);
-      } finally {
-        clearTimeout(forceClose);
-      }
-    },
+    close,
   };
+
+  async function close(): Promise<void> {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    for (const controller of requests) controller.abort();
+    for (const bridge of bridges) bridge.stop("The game server is shutting down.", 1001);
+    const forceClose = setTimeout(() => { for (const peer of wss.clients) peer.terminate(); }, 1000);
+    try {
+      const results = await Promise.allSettled([
+        vite?.close(),
+        new Promise<void>(resolve => wss.close(() => resolve())),
+        new Promise<void>((resolve, reject) => {
+          if (!server.listening) return resolve();
+          server.close(error => error ? reject(error) : resolve());
+          server.closeAllConnections();
+        }),
+      ]);
+      const failed = results.find(result => result.status === "rejected");
+      if (failed?.status === "rejected") throw failed.reason;
+    } finally {
+      clearTimeout(forceClose);
+    }
+  }
 }
 
 async function main(): Promise<void> {
   const game = await createGlasshouseServer();
-  const address = await game.listen();
+  let address: AddressInfo;
+  try {
+    address = await game.listen();
+  } catch (error) {
+    try { await game.close(); } catch (cleanupError) { safeLog("startup-cleanup", cleanupError); }
+    if (typeof error === "object" && error !== null && "code" in error && error.code === "EADDRINUSE") {
+      const port = "port" in error && typeof error.port === "number" ? ` ${error.port}` : "";
+      throw new ServiceError(503, "PORT_IN_USE", `Port${port} is already in use. The existing server was left running. Use its URL, stop it explicitly, or choose a different PORT before starting Glasshouse again.`);
+    }
+    throw error;
+  }
   console.info(`Operation Glasshouse listening at http://${address.address.includes(":") ? `[${address.address}]` : address.address}:${address.port}`);
   const shutdown = () => { void game.close().catch(error => { safeLog("shutdown", error); process.exitCode = 1; }); };
   process.once("SIGINT", shutdown);
@@ -345,5 +364,9 @@ async function main(): Promise<void> {
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  void main().catch(error => { safeLog("startup", error); process.exitCode = 1; });
+  void main().catch(error => {
+    safeLog("startup", error);
+    if (error instanceof ServiceError) console.error(error.message);
+    process.exitCode = 1;
+  });
 }
