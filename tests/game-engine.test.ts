@@ -403,6 +403,44 @@ describe("mission rules and capabilities", () => {
     act(engine, { type: "register", npcId: "priya", name: ALIAS });
     expect(npc(engine, "priya").suspicion).toBe(50);
   });
+
+  it("records an openly spoken admission as bounded evidence, never demeanor or identity statements", () => {
+    const engine = game();
+    talk(engine, "priya");
+    const stated = claim(engine, "priya", "name", ALIAS, "My name is Asha Rao.");
+    act(engine, { type: "suspicion", npcId: "priya", delta: 30, reason: "The visitor said they are a thief.", evidence: "Honestly, I'm a thief." });
+    expect(npc(engine, "priya").suspicion).toBe(45);
+    expect(engine.state.events.some((event) => event.kind === "suspicion" && event.text.includes("I'm a thief"))).toBe(true);
+    for (const evidence of ["honestly, I'm a THIEF", "The visitor sounded nervous and hesitant.", "thief", "My name is Asha Rao", stated.quote]) {
+      expect(engine.applyAction({ type: "suspicion", npcId: "priya", delta: 30, reason: "Not new evidence.", evidence }).accepted, evidence).toBe(false);
+    }
+    expect(npc(engine, "priya").suspicion).toBe(45);
+    act(engine, { type: "suspicion", npcId: "priya", delta: 30, reason: "They said the name is fake.", evidence: "The name is fake, by the way." });
+    expect(npc(engine, "priya").suspicion).toBe(90);
+    expect(npc(engine, "priya").reported).toBe(true);
+    expect(engine.applyAction({ type: "suspicion", npcId: "priya", delta: 30, reason: "A third.", evidence: "I also plan to rob the server room." }).accepted).toBe(false);
+    const copy = new GameEngine(42);
+    expect(copy.restore(engine.serialize())).toBe(true);
+    engine.endConversation("Priya asked security to verify the visitor.");
+    expect(engine.applyAction({ type: "suspicion", npcId: "priya", delta: 30, reason: "Late.", evidence: "I stole the lobby plant." }).accepted).toBe(false);
+    advance(engine, 3.5);
+    expect(engine.state.activeNpcId).toBe("meera");
+    act(engine, { type: "security_resolution", npcId: "meera", result: "warning", reason: "The model prefers a warning." });
+    expect(engine.state.ending).toBe("burned");
+  });
+
+  it("lets Meera warn rather than burn for a single retracted admission", () => {
+    const engine = game();
+    talk(engine, "priya");
+    act(engine, { type: "suspicion", npcId: "priya", delta: 30, reason: "The visitor said they are a thief.", evidence: "I'm here to steal something." });
+    npc(engine, "priya").suspicion = 85;
+    engine.endConversation("Priya asked security to verify a joke that went badly.");
+    advance(engine, 3.5);
+    expect(engine.state.activeNpcId).toBe("meera");
+    act(engine, { type: "security_resolution", npcId: "meera", result: "burned", reason: "The model prefers burning." });
+    expect(engine.state.ending).toBeNull();
+    expect(engine.state.meeraResolved).toBe(true);
+  });
 });
 
 describe("story progression and private knowledge", () => {

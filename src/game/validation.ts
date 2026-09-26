@@ -173,7 +173,7 @@ const runtimeSchema: z.ZodType<EngineRuntime> = z.object({
   rumorPayloads: z.record(z.object({ claimIds: idList, incidentIds: idList }).strict()),
   incidents: z.array(z.object({
     id,
-    kind: z.enum(["contradiction", "trespass"]),
+    kind: z.enum(["contradiction", "trespass", "admission"]),
     npcId: id,
     at: time,
     claimIds: idList,

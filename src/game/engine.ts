@@ -27,6 +27,10 @@ const MAIN_POSTS = new Set(["priya", "ramesh", "dev", "anita", "kulkarni"]);
 const CORE_FACTS = ["access_rules", "cfo_away", "server_room"];
 const AUTO_ENCOUNTER_COOLDOWN = 45;
 const AUTO_ENCOUNTER_RADIUS = 4.2;
+// A confession crosses the verification threshold; a second one reaches security escalation.
+const ADMISSION_SUSPICION = 45;
+const MAX_ADMISSIONS_PER_NPC = 2;
+const DEMEANOR_EVIDENCE = /\b(?:nervous\w*|hesitat\w*|looked away|looks away|looking away|gaze|tone|accent|pause[sd]?|pausing|sweat\w*|fidget\w*|facial|expression|demeanou?r|stammer\w*|stutter\w*|body language|sounds? (?:shifty|suspicious)|seem(?:s|ed)? (?:shifty|suspicious))\b/i;
 const LOCAL_ROUTINE = "Initial routine (local fallback; awaiting Gemini).";
 const LOCAL_CHATTER = [
   "The printer queue is longer than the tea queue today.",
@@ -38,6 +42,10 @@ const LOCAL_CHATTER = [
 
 function sameValue(a: string, b: string): boolean {
   return normalizeAlias(a) === normalizeAlias(b);
+}
+
+function plainWords(value: string): string {
+  return value.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
 }
 
 function unique(values: readonly string[]): string[] {
@@ -682,11 +690,10 @@ export class GameEngine {
       const incident = this.runtime.incidents.find((candidate) => heard.has(candidate.id)
         && (action.evidence === candidate.id || candidate.claimIds.some((claimId) => {
           const claim = this.state.ledger.find((entry) => entry.id === claimId);
-          return claim && (action.evidence === claim.id || action.evidence === claim.quote);
+          return claim && (action.evidence === claim.id
+            || (action.evidence !== undefined && plainWords(action.evidence) === plainWords(claim.quote)));
         })));
-      if (!incident) {
-        return this.reject("Positive suspicion needs an observed discrepancy's claim ID/exact quote or a witnessed incident event ID. Demeanor is not evidence.", npc.id);
-      }
+      if (!incident) return this.recordAdmission(action, npc);
       const evidenceKey = `${npc.id}-${incident.id}`;
       if (this.runtime.usedModelEvidence.includes(evidenceKey)) {
         return this.reject("That incident has already been assessed in a suspicion proposal.", npc.id);
@@ -702,6 +709,33 @@ export class GameEngine {
     }
     this.adjustSuspicion(npc, delta);
     return { accepted: true, message: `Suspicion adjusted by a bounded ${delta}; current level ${npc.suspicion}.` };
+  }
+
+  // An explicit self-incriminating statement is spoken evidence, like a claim; demeanor never is.
+  private recordAdmission(action: Extract<GameAction, { type: "suspicion" }>, npc: NpcState): ActionResult {
+    const refusal = "Positive suspicion needs an observed discrepancy's claim ID/exact quote, a witnessed incident event ID, or the visitor's own self-incriminating words in this conversation. Demeanor is not evidence.";
+    const quote = (action.evidence ?? "").trim().replace(/\s+/g, " ");
+    const words = quote.split(" ").filter(Boolean).length;
+    if (this.state.activeNpcId !== npc.id || words < 2 || words > 60 || quote.length > 240
+      || /^(?:claim|incident)-\d+$/i.test(quote) || DEMEANOR_EVIDENCE.test(quote)) {
+      return this.reject(refusal, npc.id);
+    }
+    if (this.state.ledger.some((claim) => plainWords(claim.quote) === plainWords(quote))) {
+      return this.reject("An ordinary identity statement is not an admission. Quote only the self-incriminating words.", npc.id);
+    }
+    const evidenceKey = `${npc.id}-admission-${plainWords(quote)}`;
+    if (this.runtime.usedModelEvidence.includes(evidenceKey)) {
+      return this.reject("Those words have already been assessed in a suspicion proposal.", npc.id);
+    }
+    const prior = this.runtime.incidents.filter((incident) => incident.kind === "admission" && incident.npcId === npc.id).length;
+    if (prior >= MAX_ADMISSIONS_PER_NPC) {
+      return this.reject("This character already has the visitor's admissions on record.", npc.id);
+    }
+    const incident = this.addIncident(npc, "admission", [], null,
+      `${this.definition(npc.id).name} heard the visitor openly say: "${quote}"`);
+    this.runtime.usedModelEvidence.push(evidenceKey, `${npc.id}-${incident.id}`);
+    this.adjustSuspicion(npc, ADMISSION_SUSPICION);
+    return { accepted: true, message: `The visitor's own words were recorded as evidence. Suspicion is now ${npc.suspicion}.` };
   }
 
   private serviceStalled(npc: NpcState): ActionResult | null {
@@ -906,8 +940,10 @@ export class GameEngine {
         claim.id === claimId && (claim.field === "name" || claim.field === "company"),
       )));
     const trespasses = new Set(incidents.filter((incident) => incident.kind === "trespass").map((incident) => incident.id));
+    const admissions = new Set(incidents.filter((incident) => incident.kind === "admission").map((incident) => incident.id));
     return identityConflicts.size >= 2 || trespasses.size >= 3
-      || (identityConflicts.size >= 1 && trespasses.size >= 2);
+      || (identityConflicts.size >= 1 && trespasses.size >= 2)
+      || admissions.size >= 2 || (admissions.size >= 1 && identityConflicts.size + trespasses.size >= 1);
   }
 
   private resolveSecurity(): ActionResult {
@@ -924,7 +960,7 @@ export class GameEngine {
       npc.suspicion = Math.min(npc.suspicion, 60);
     }
     const summary = burned
-      ? "Meera confirmed multiple documented identity discrepancies or repeated witnessed trespass."
+      ? "Meera confirmed multiple documented identity discrepancies, repeated witnessed trespass, or the visitor's own recorded admissions."
       : "Meera issued a warning. The available records do not justify burning the cover.";
     this.closeConversation(summary);
     this.emit("story", summary, "meera");
@@ -965,8 +1001,10 @@ export class GameEngine {
       incidentIds: [...incidentIds],
     };
     const label = identity.map((claim) => `${claim.field}: "${claim.value}"`).join("; ");
+    const admitted = relevantIncidents.some((incident) => incident.kind === "admission");
     const text = `${this.definition(from).name}: ${label || "A visitor asked about the building."}`
-      + (incidentIds.length ? " There is a recorded discrepancy or witnessed restricted-room incident to verify." : "");
+      + (admitted ? " The visitor openly said something alarming; it is on record to verify."
+        : incidentIds.length ? " There is a recorded discrepancy or witnessed restricted-room incident to verify." : "");
     const rumor = {
       id: this.nextId("rumor"), from, to, text,
       at: this.state.elapsedSeconds + delay, delivered: false,
@@ -1389,6 +1427,7 @@ export class GameEngine {
       if (incident.kind === "trespass" && (!incident.roomId
         || !floors.some((plan) => plan.rooms.some((room) => room.id === incident.roomId && room.restricted)))) return "Trespass evidence references a nonexistent restricted room.";
       if (incident.kind === "contradiction" && incident.claimIds.length === 0) return "A contradiction has no recorded statement.";
+      if (incident.kind === "admission" && (incident.claimIds.length > 0 || incident.roomId !== null || !incident.text.trim())) return "An admission record is malformed.";
     }
     if (runtime.security.evidenceIds.some((id) => !incidentIds.has(id)
       || !runtime.heardIncidents.meera.includes(id))) return "Meera's evidence was never delivered or observed.";

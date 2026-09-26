@@ -9,7 +9,7 @@ import { limits, type ServerConfig } from "./config";
 import { buildDirectorPlan } from "./director";
 import { invalidResponse, providerError, ServiceError } from "./errors";
 import {
-  actionIsAllowed, conversationInstruction, directorInstruction,
+  actionIsAllowed, conversationInstruction, directorInstruction, evidenceIsGrounded,
 } from "./prompts";
 import { dialogueReplySchema, generationJsonSchema } from "./schemas";
 import { generatedAudioToWav } from "./wav";
@@ -118,10 +118,13 @@ export function createGeminiService(config: ServerConfig, injected?: GeminiTrans
     },
     async dialogue(context, text, signal) {
       const reply = await structured(conversationInstruction(context, false), JSON.stringify({ visitorSaid: text }), dialogueReplySchema, signal);
-      if (reply.actions.some(action => !actionIsAllowed(action, context))) throw invalidResponse();
-      const endIndex = reply.actions.findIndex(action => action.type === "end_conversation");
-      if (endIndex !== -1 && endIndex !== reply.actions.length - 1) throw invalidResponse();
-      return reply;
+      // An ungrounded suspicion proposal is dropped; it must not discard the rest of a valid reply.
+      const actions = reply.actions.filter(action => action.type !== "suspicion" || action.delta <= 0
+        || evidenceIsGrounded(action.evidence, [text], context));
+      if (actions.some(action => !actionIsAllowed(action, context))) throw invalidResponse();
+      const endIndex = actions.findIndex(action => action.type === "end_conversation");
+      if (endIndex !== -1 && endIndex !== actions.length - 1) throw invalidResponse();
+      return { ...reply, actions };
     },
     async tts(text, voiceName, signal) {
       if (!voiceNames.has(voiceName)) throw new ServiceError(400, "INVALID_VOICE", "Choose a supported Gemini prebuilt voice name.");

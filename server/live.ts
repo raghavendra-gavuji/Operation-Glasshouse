@@ -6,7 +6,7 @@ import { limits } from "./config";
 import { invalidResponse, providerError, safeLog, ServiceError } from "./errors";
 import type { GeminiService, LiveSession } from "./gemini";
 import {
-  actionIsAllowed, canonicalNpc, conversationInstruction, conversationSnapshot, gameActionTool, identityClaimsTool,
+  actionIsAllowed, canonicalNpc, conversationInstruction, conversationSnapshot, evidenceIsGrounded, gameActionTool, identityClaimsTool,
 } from "./prompts";
 import { actionArgumentsSchema, clientLiveMessageSchema, coverFieldSchema, gameActionSchema, identityClaimsSchema, parseInput } from "./schemas";
 
@@ -32,6 +32,8 @@ class TranscriptBuffer {
   private text = "";
 
   constructor(private readonly speaker: "player" | "npc", private readonly emit: Emit) {}
+
+  get current(): string { return this.text; }
 
   append(transcription: Transcription): void {
     const delta = transcription.text ?? "";
@@ -66,6 +68,7 @@ export class LiveBridge {
   private readonly cancelledCalls = new Set<string>();
   private readonly inputTranscript: TranscriptBuffer;
   private readonly outputTranscript: TranscriptBuffer;
+  private readonly playerSpeech: string[] = [];
   private outputTextFallback = "";
   private outputHadTranscript = false;
   private inputSpeaking = false;
@@ -91,7 +94,10 @@ export class LiveBridge {
     this.audioBudget = new TokenBucket(64_000, 33_000, this.now);
     this.textBudget = new TokenBucket(4, 0.5, this.now);
     this.contextBudget = new TokenBucket(20, 5, this.now);
-    this.inputTranscript = new TranscriptBuffer("player", emit);
+    this.inputTranscript = new TranscriptBuffer("player", message => {
+      if (message.type === "transcript" && message.final) this.rememberSpeech(message.text);
+      emit(message);
+    });
     this.outputTranscript = new TranscriptBuffer("npc", emit);
     this.setupTimer = setTimeout(() => this.fail(new ServiceError(408, "LIVE_START_TIMEOUT", "No encounter was started. Start a conversation to reconnect.", true)), 10_000);
   }
@@ -150,6 +156,7 @@ export class LiveBridge {
         case "text":
           if (!this.textBudget.take()) throw new ServiceError(429, "LIVE_TEXT_RATE", "Wait for the current exchange before sending more text.");
           this.inputTranscript.finish();
+          this.rememberSpeech(message.text);
           this.emit({ type: "transcript", speaker: "player", text: message.text, final: true });
           this.endAudioStream();
           this.session.sendClientContent({ turns: [{ role: "user", parts: [{ text: message.text }] }], turnComplete: true });
@@ -338,6 +345,12 @@ export class LiveBridge {
     }
   }
 
+  private rememberSpeech(text: string): void {
+    if (!text.trim()) return;
+    this.playerSpeech.push(text.slice(0, 2000));
+    if (this.playerSpeech.length > 24) this.playerSpeech.shift();
+  }
+
   private finishOutputTranscript(): void {
     if (!this.outputHadTranscript && this.outputTextFallback) {
       this.outputTranscript.append({ text: this.outputTextFallback });
@@ -375,6 +388,14 @@ export class LiveBridge {
       const args = actionArgumentsSchema.safeParse(call.args);
       const parsed = args.success ? gameActionSchema.safeParse({ ...args.data, npcId: context.npc.id }) : undefined;
       if (parsed?.success) actions = [parsed.data];
+    }
+    const ungrounded = actions.find(action => action.type === "suspicion" && action.delta > 0
+      && !evidenceIsGrounded(action.evidence, [...this.playerSpeech, this.inputTranscript.current], context));
+    if (ungrounded) {
+      const result = { accepted: false, message: "Positive suspicion must cite the visitor's actual words from this encounter, a recorded claim ID/quote, or an engine incident ID. Tone, pauses and demeanor are not evidence. No action was sent to the game engine." };
+      this.completedCalls.set(call.id, result);
+      this.sendToolResponse(call.id, call.name, result);
+      return;
     }
     if (!actions.length || actions.some(action => !actionIsAllowed(action, context))) {
       const result = { accepted: false, message: "The proposal is invalid, has no new stated claims, or is unavailable to this NPC. For record_identity_claims supply all seven identity fields (empty only when unstated) plus the actual quote. No action was sent to the game engine." };

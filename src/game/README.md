@@ -135,11 +135,20 @@ turns makes a conversation meaningful. `server_observation` is optional physical
 reconnaissance from the public corridor by the floor-7 blue door; it never
 substitutes for `handler_secret`.
 
-Positive model suspicion needs an observed incident ID, or an associated claim
-ID/exact quote. A feeling, accent, camera cue, or hesitation is not evidence.
-Proposals clamp to -20 through +30 and meters to 0 through 100. One incident
-cannot be repeatedly charged; one conversation can apply one clarification
-reduction. The original claims and quotes remain intact.
+Positive model suspicion needs an observed incident ID, an associated claim
+ID/exact quote, or the visitor's own openly self-incriminating words spoken to
+the active NPC (for example, "I'm a thief"). A feeling, accent, camera cue, or
+hesitation is not evidence. Proposals clamp to -20 through +30 and meters to 0
+through 100. One incident cannot be repeatedly charged; one conversation can
+apply one clarification reduction. The original claims and quotes remain intact.
+
+A quoted admission becomes an `admission` incident with a fixed +45 weight, so
+one crosses the verification threshold and a second reaches security
+escalation. Each character holds at most two, identical words count once,
+ordinary identity-claim quotes and demeanor descriptions are refused, and the
+server only forwards quotes that match the visitor's transcribed words. Meera
+burns the cover for two delivered admissions, or for one plus another
+contradiction or trespass; a single admission alone earns a warning.
 
 ## Private context and persistence
 

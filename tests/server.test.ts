@@ -240,6 +240,22 @@ describe("Gemini response contracts and NPC authority", () => {
     expect(generate).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps typed admissions grounded in the visitor's words without discarding the reply", async () => {
+    const generate = vi.fn<GeminiTransport["generateContent"]>(async () => response({
+      reply: "You're what? I'm not signing anyone in after that.",
+      actions: [
+        { type: "suspicion", npcId: "priya", delta: 30, reason: "Openly admitted theft.", evidence: "I am a thief" },
+        { type: "suspicion", npcId: "priya", delta: 30, reason: "Seemed evasive.", evidence: "The visitor planned an elaborate heist" },
+      ],
+    }));
+    const service = createGeminiService(config, { generateContent: generate, connect: vi.fn() });
+    const reply = await service.dialogue(context(), "Honestly? I'm a thief.", new AbortController().signal);
+    expect(reply.reply).toContain("not signing");
+    expect(reply.actions).toEqual([
+      { type: "suspicion", npcId: "priya", delta: 30, reason: "Openly admitted theft.", evidence: "I am a thief" },
+    ]);
+  });
+
   it.each([
     [400, "GEMINI_REQUEST"], [401, "GEMINI_AUTH"], [403, "GEMINI_AUTH"], [404, "GEMINI_MODEL"], [429, "GEMINI_QUOTA"], [503, "GEMINI_UNAVAILABLE"],
   ])("preserves SDK HTTP %i classification without automatic retries", async (status, code) => {
@@ -345,6 +361,28 @@ describe("Live bridge lifecycle and tool acknowledgements", () => {
       { type: "transcript", speaker: "npc", text: "Welcome", final: true },
     ]);
     expect(emitted.at(-1)).toEqual({ type: "turn_complete" });
+  });
+
+  it("forwards positive suspicion only when it quotes the visitor's actual spoken or typed words", async () => {
+    const { stub, emitted, bridge } = await setup();
+    stub.parameters.callbacks.onmessage(modelMessage({ serverContent: { inputTranscription: { text: "Honestly? I'm a thief, and I'm here to steal the keycard." } } }));
+    stub.parameters.callbacks.onmessage(modelMessage({ toolCall: { functionCalls: [
+      { id: "admission-1", name: "apply_game_action", args: { type: "suspicion", delta: 30, reason: "Openly admitted theft.", evidence: "I am a thief" } },
+      { id: "demeanor-1", name: "apply_game_action", args: { type: "suspicion", delta: 30, reason: "Seemed shifty.", evidence: "The visitor seems nervous" } },
+      { id: "invented-1", name: "apply_game_action", args: { type: "suspicion", delta: 30, reason: "Imagined confession.", evidence: "I work for Ashoka Capital" } },
+    ] } }));
+    const actions = emitted.filter(message => message.type === "action");
+    expect(actions).toHaveLength(1);
+    expect(actions[0]).toMatchObject({ action: { type: "suspicion", npcId: "priya", evidence: "I am a thief" } });
+    expect(stub.session.sendToolResponse).toHaveBeenCalledTimes(2);
+    for (const [index, id] of ["demeanor-1", "invented-1"].entries()) {
+      expect(stub.session.sendToolResponse.mock.calls[index][0]).toMatchObject({ functionResponses: [{ id, response: { accepted: false } }] });
+    }
+    bridge.receive({ type: "text", text: "Fine, the name is fake too." });
+    stub.parameters.callbacks.onmessage(modelMessage({ toolCall: { functionCalls: [
+      { id: "admission-2", name: "apply_game_action", args: { type: "suspicion", delta: 30, reason: "Admitted a fake name.", evidence: "the name is fake" } },
+    ] } }));
+    expect(emitted.filter(message => message.type === "action")).toHaveLength(2);
   });
 
   it("rejects invalid role powers instead of emitting an engine action", async () => {

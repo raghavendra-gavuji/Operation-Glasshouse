@@ -21,7 +21,7 @@ export interface ConversationRuntime {
 
 export interface Incident {
   id: string;
-  kind: "contradiction" | "trespass";
+  kind: "contradiction" | "trespass" | "admission";
   npcId: string;
   at: number;
   claimIds: string[];
