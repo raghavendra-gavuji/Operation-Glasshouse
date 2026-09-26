@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "assets": [
+    {
+      "id": "meridian-exterior",
+      "url": "/generated/meridian-exterior-b9206de5637a24c4.png",
+      "kind": "background",
+      "model": "gemini-3.1-flash-lite-image",
+      "generatedAt": "2026-09-26T08:44:51.308Z"
+    },
+    {
+      "id": "portrait-ghost",
+      "kind": "portrait",
+      "url": "/generated/portrait-ghost-f0852f0b2e342b35.png",
+      "model": "gemini-3.1-flash-lite-image",
+      "generatedAt": "2026-09-26T08:44:55.510Z"
+    }
+  ],
+  "status": "partial"
+}
