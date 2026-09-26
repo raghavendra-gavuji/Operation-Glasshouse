@@ -80,11 +80,11 @@ class Socket {
   onopen: (() => void) | null = null;
   onmessage: ((event: { data: unknown }) => void) | null = null;
   onerror: (() => void) | null = null;
-  onclose: (() => void) | null = null;
+  onclose: ((event: { reason: string }) => void) | null = null;
   sent: ClientLiveMessage[] = [];
   constructor(readonly url: string) { Socket.instances.push(this); }
   send = vi.fn((value: string) => { this.sent.push(JSON.parse(value)); });
-  close = vi.fn(() => { this.readyState = Socket.CLOSED; this.onclose?.(); });
+  close = vi.fn(() => { this.readyState = Socket.CLOSED; this.onclose?.({ reason: "" }); });
   open() { this.readyState = Socket.OPEN; this.onopen?.(); }
   deliver(message: ServerLiveMessage) { this.onmessage?.({ data: JSON.stringify(message) }); }
   deliverRaw(data: unknown) { this.onmessage?.({ data }); }
@@ -389,7 +389,45 @@ describe("VoiceClient browser audio lifecycle", () => {
     expect(microphone.track.enabled).toBe(false);
     expect(socket.close).toHaveBeenCalledOnce();
     expect(onClose).toHaveBeenCalledOnce();
+    expect(onClose).toHaveBeenCalledWith("The voice response was malformed or could not be played. Continue with text or explicitly reconnect.");
     expect(onError).toHaveBeenCalledOnce();
+  });
+
+  it("passes the server's close reason to a reason-consuming onClose callback", async () => {
+    const reasons: string[] = [];
+    const voice = client({ onClose: reason => { reasons.push(reason); } });
+    await voice.prepare();
+    const socket = await connect(voice);
+    socket.deliver({ type: "closed", reason: "The voice encounter reached its duration limit." });
+    expect(reasons).toEqual(["The voice encounter reached its duration limit."]);
+  });
+
+  it("preserves a fatal server error as the close reason", async () => {
+    const onClose = vi.fn();
+    const voice = client({ onClose });
+    await voice.prepare();
+    const socket = await connect(voice);
+    socket.deliver({ type: "error", message: "The voice provider rejected this encounter.", recoverable: false });
+    expect(onClose).toHaveBeenCalledExactlyOnceWith("The voice provider rejected this encounter.");
+  });
+
+  it("preserves a native WebSocket close reason when no closed message arrived", async () => {
+    const onClose = vi.fn();
+    const voice = client({ onClose });
+    await voice.prepare();
+    const socket = await connect(voice);
+    socket.readyState = Socket.CLOSED;
+    socket.onclose?.({ reason: "The game server is shutting down." });
+    expect(onClose).toHaveBeenCalledExactlyOnceWith("The game server is shutting down.");
+  });
+
+  it("provides a stable reason for an intentional disconnect", async () => {
+    const onClose = vi.fn();
+    const voice = client({ onClose });
+    await voice.prepare();
+    await connect(voice);
+    voice.disconnect();
+    expect(onClose).toHaveBeenCalledExactlyOnceWith("Encounter ended.");
   });
 
   it("measures WebSocket bounds in UTF-8 bytes rather than JavaScript characters", async () => {

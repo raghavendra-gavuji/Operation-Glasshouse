@@ -8,7 +8,7 @@ export interface VoiceCallbacks {
   onAction?: (action: GameAction, requestId: string) => void;
   onLevel?: (level: number) => void;
   onError?: (message: string) => void;
-  onClose?: () => void;
+  onClose?: (reason: string) => void;
   onTurnComplete?: () => void;
   onPlaybackDrained?: () => void;
   onCameraStream?: (stream: MediaStream | null) => void;
@@ -262,8 +262,8 @@ export class VoiceClient {
         socket.onerror = () => {
           if (epoch === this.connectionEpoch) this.failConnection("The voice connection failed. Check the local server, then explicitly retry or use text.");
         };
-        socket.onclose = () => {
-          if (epoch === this.connectionEpoch) this.failConnection("The voice connection closed. Your game progress is preserved; explicitly reconnect or use text.");
+        socket.onclose = event => {
+          if (epoch === this.connectionEpoch) this.failConnection(event.reason || "The voice connection closed. Your game progress is preserved; explicitly reconnect or use text.");
         };
       }).catch(() => {
         if (epoch === this.connectionEpoch) this.failConnection("Browser audio is suspended. Use a browser gesture to resume audio or continue with text.");
@@ -276,7 +276,7 @@ export class VoiceClient {
     this.closeConnection(false);
   }
 
-  private closeConnection(error: boolean): void {
+  private closeConnection(error: boolean, reason = "Encounter ended."): void {
     const hadConnection = Boolean(this.socket || this.pendingConnection || this.active);
     this.connectionEpoch++;
     this.active = false;
@@ -303,12 +303,12 @@ export class VoiceClient {
     }
     this.context = null;
     this.setStatus(error ? "error" : "idle");
-    if (hadConnection) this.callbacks.onClose?.();
+    if (hadConnection) this.callbacks.onClose?.(reason);
   }
 
   private failConnection(message: string): void {
     this.report(message);
-    this.closeConnection(true);
+    this.closeConnection(true, message);
   }
 
   updateContext(context: ConversationContext): void {
@@ -447,10 +447,10 @@ export class VoiceClient {
       case "error":
         this.lastServerError = true;
         this.report(message.message);
-        if (!message.recoverable) this.closeConnection(true);
+        if (!message.recoverable) this.closeConnection(true, message.message);
         break;
       case "closed":
-        this.closeConnection(this.lastServerError);
+        this.closeConnection(this.lastServerError, message.reason);
         break;
     }
   }

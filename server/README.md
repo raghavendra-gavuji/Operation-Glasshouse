@@ -45,6 +45,7 @@ Priya registers; Dev or Anita authorizes; Ramesh issues the card. Kulkarni can o
 - `onTranscript` contains a **cumulative utterance snapshot**, not a delta. Replace the current caption until `final:true`. WS `sendText` gets one finalized player transcript from the server; do not journal it a second time. REST dialogue needs its own transcript entries.
 - On `onAction`, apply the engine action, call `respondToTool`, then send updated context if the encounter still exists. For accepted `end_conversation`, **wait for `onTurnComplete` before disconnecting** so the acknowledged farewell can finish.
 - `onTurnComplete` runs only after a server turn boundary and drained speaker audio. `onPlaybackDrained` is optional and can also occur between chunks; it alone is not a farewell signal. Barge-in, errors and disconnect immediately cancel both current and scheduled playback.
+- `onClose(reason: string)` receives the safe server/transport explanation, or `Encounter ended.` for an intentional disconnect. Existing zero-argument callbacks can ignore this argument.
 - `playNarration` uses the same unlocked context and cannot overlap a live encounter. Intentional cancellation rejects with `AbortError`, without an error toast. Audio and video are never written to disk.
 - Camera access is requested only by `setCameraEnabled(true)`, from a separate explicit consent click. Optional `onCameraStream` provides the local preview stream; disabling the camera releases it.
 
