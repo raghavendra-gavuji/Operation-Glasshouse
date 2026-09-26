@@ -265,7 +265,10 @@ export class GameEngine {
     return {
       floor: structuredClone(this.currentFloor),
       player: { ...this.state.player },
-      npcs: this.state.npcs.filter((npc) => npc.floor === this.state.floor).map((npc) => ({
+      activeNpcId: this.state.activeNpcId,
+      npcs: this.state.npcs.filter((npc) =>
+        npc.floor === this.state.floor && npc.id !== this.state.activeNpcId,
+      ).map((npc) => ({
         definition: {
           ...structuredClone(this.definition(npc.id)),
           knowledge: [],

@@ -162,6 +162,7 @@ export interface ConversationContext {
 export interface DirectorContext {
   floor: FloorPlan;
   player: GameState["player"];
+  activeNpcId?: string | null;
   npcs: { definition: NpcDefinition; state: NpcState }[];
   events: GameEvent[];
   alert: boolean;

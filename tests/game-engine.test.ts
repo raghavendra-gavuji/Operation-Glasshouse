@@ -488,6 +488,7 @@ describe("story progression and private knowledge", () => {
     const engine = game();
     register(engine);
     const context = engine.getDirectorContext();
+    expect(context.activeNpcId).toBeNull();
     expect(context.npcs).toHaveLength(6);
     expect(context.npcs.every((entry) => entry.state.floor === 1)).toBe(true);
     const serialized = JSON.stringify(context);
@@ -495,6 +496,25 @@ describe("story progression and private knowledge", () => {
     expect(serialized).not.toContain(COMPANY);
     expect(serialized).not.toContain("Ashoka Capital");
     expect(context.npcs.every((entry) => entry.definition.knowledge.length === 0)).toBe(true);
+  });
+
+  it.each(["priya", "dev", "staff-1-1"])("excludes engaged %s from director candidates without removing the live actor", (npcId) => {
+    const engine = game();
+    talk(engine, npcId);
+    const stateBeforeContext = structuredClone(engine.state);
+    const localActors = engine.state.npcs.filter((candidate) => candidate.floor === engine.state.floor);
+    const context = engine.getDirectorContext();
+    expect(context.activeNpcId).toBe(npcId);
+    expect(context.npcs.map((entry) => entry.state.id)).toEqual(
+      localActors.filter((candidate) => candidate.id !== npcId).map((candidate) => candidate.id),
+    );
+    expect(context.npcs.every((entry) => entry.definition.id !== npcId)).toBe(true);
+    expect(engine.state).toEqual(stateBeforeContext);
+    expect(engine.state.npcs).toContain(npc(engine, npcId));
+    engine.endConversation("Ready to return to office duties.");
+    const afterConversation = engine.getDirectorContext();
+    expect(afterConversation.activeNpcId).toBeNull();
+    expect(afterConversation.npcs.map((entry) => entry.state.id)).toEqual(localActors.map((candidate) => candidate.id));
   });
 
   it("adds optional floor-7 reconnaissance without requiring trespass or revealing the Handler", () => {
