@@ -1,10 +1,11 @@
 import type { ActionResult, DialogueReply, Ending, GameAction, GameEvent, GameState, NpcDefinition, VoiceStatus } from "../shared/types";
 import { HANDLER_BRIEFING } from "../shared/story";
 import { VoiceClient } from "./audio";
-import { GameEngine, GAME_END_MINUTE, normalizeAlias } from "./game/engine";
+import { GameEngine, GAME_END_MINUTE, SUSPICION_THRESHOLDS, normalizeAlias } from "./game/engine";
 import { OfficeRenderer } from "./renderer";
 import { ArtCache } from "./ui/assets";
 import { MovementInput, isTextTarget } from "./ui/controls";
+import { canAnswerConversation } from "./ui/conversation";
 import { DirectorLoop } from "./ui/director";
 import { readApiError } from "./ui/http";
 import { ENDING_COPY, clockLabel, escapeHtml, eventClock, fieldLabel, missionRank } from "./ui/mission";
@@ -38,6 +39,7 @@ let textController: AbortController | undefined;
 let transport: "live" | "text" | "practice" = "text";
 let voiceStatus: VoiceStatus = "idle";
 let busy = false;
+let liveReplyPending = false;
 let microphoneMuted = false;
 let soundMuted = false;
 let intentionalDisconnect = true;
@@ -50,6 +52,7 @@ let ledgerTab = "claims";
 let activeModal: string | null = null;
 let providerConfigured: boolean | null = null;
 let providerHealthy = true;
+let providerNoticeSource: "director" | "connection" | null = null;
 let directorReady = false;
 let narrationPending = false;
 let encounterVersion = 0;
@@ -64,6 +67,7 @@ const debugEntries: string[] = [];
 const voice = new VoiceClient({
   onStatus(status) {
     voiceStatus = status;
+    if (!intentionalDisconnect && transport === "live" && (status === "listening" || status === "speaking")) clearProviderError("connection");
     updateVoiceStatus();
   },
   onTranscript(entry) {
@@ -72,14 +76,21 @@ const voice = new VoiceClient({
     text(entry.speaker === "npc" ? "npc-caption" : "player-caption", result.text);
     if (entry.speaker === "npc") renderer.setSpeech(conversationId, result.text);
     if (result.commit) recordTranscript(entry.speaker, result.text);
+    if (entry.speaker === "player") {
+      liveReplyPending = true;
+      updateVoiceStatus();
+    }
   },
   onAction(action, requestId) {
+    liveReplyPending = true;
+    updateVoiceStatus();
     const result = applyGameAction(action);
     voice.respondToTool(requestId, result);
     if (conversationId) voice.updateContext(engine.getConversationContext(conversationId));
     if (result.accepted && !engine.state.activeNpcId && conversationId) waitForFarewell();
   },
   onTurnComplete() {
+    liveReplyPending = false;
     finishTranscriptTurn();
     if (pendingEnd || engine.state.phase === "ended") closeConversation();
     else updateVoiceStatus();
@@ -94,10 +105,12 @@ const voice = new VoiceClient({
     if (conversationId && !pendingEnd && transport === "live") {
       transport = "text";
       busy = false;
+      liveReplyPending = false;
+      disconnectVoice();
       updateVoiceStatus();
     }
   },
-  onClose() {
+  onClose(reason) {
     if (intentionalDisconnect || !conversationId) return;
     if (pendingEnd) {
       closeConversation();
@@ -105,7 +118,8 @@ const voice = new VoiceClient({
     }
     transport = "text";
     busy = false;
-    showProviderError("The Gemini voice connection ended. Typed Gemini replies remain available.");
+    liveReplyPending = false;
+    showProviderError(`Gemini voice connection ended: ${reason} Typed Gemini replies remain available.`);
     updateVoiceStatus();
   },
 });
@@ -118,6 +132,7 @@ const director = new DirectorLoop({
     engine.applyDirector(reply);
     providerHealthy = true;
     directorReady = true;
+    clearProviderError("director");
     debug(`Gemini director · ${latency} ms · floor ${engine.state.floor} · ${reply.intents.length} decisions`);
     updateConnection();
   },
@@ -125,7 +140,7 @@ const director = new DirectorLoop({
     providerHealthy = false;
     directorReady = false;
     debug(`Gemini director · unavailable · retry in ${retryIn}s · ${message}`);
-    showProviderError(`Gemini director unavailable: ${message} Retrying in ${retryIn}s. Local movement continues.`);
+    showProviderError(`Gemini director unavailable: ${message} Retrying in ${retryIn}s. Local movement continues.`, "director");
     updateConnection();
   },
 });
@@ -416,6 +431,7 @@ async function startConversation(npcId: string): Promise<void> {
   disconnectVoice();
   textController?.abort();
   busy = false;
+  liveReplyPending = false;
   pendingEnd = false;
   narrationPlaying = false;
   narrationPending = false;
@@ -501,6 +517,8 @@ async function sendReply(value: string): Promise<void> {
     return;
   }
   if (transport === "live" && voiceStatus !== "error" && voiceStatus !== "idle") {
+    liveReplyPending = true;
+    updateVoiceStatus();
     voice.sendText(value);
     return;
   }
@@ -524,6 +542,7 @@ async function sendReply(value: string): Promise<void> {
     const result: unknown = await response.json();
     if (!isDialogueReply(result)) throw new Error("Gemini returned an invalid dialogue response.");
     if (version !== encounterVersion || conversationId !== npcId) return;
+    clearProviderError("connection");
     debug(`Gemini dialogue · ${Math.round(performance.now() - requestedAt)} ms · ${npc.name}`);
     for (const action of result.actions) {
       const applied = applyGameAction(action);
@@ -553,6 +572,7 @@ async function sendReply(value: string): Promise<void> {
     clearTimeout(timeout);
     if (version === encounterVersion) {
       busy = false;
+      liveReplyPending = false;
       textController = undefined;
       updateVoiceStatus();
     }
@@ -637,6 +657,7 @@ function closeConversation(): void {
   conversationId = null;
   pendingEnd = false;
   busy = false;
+  liveReplyPending = false;
   narrationPending = false;
   assembler.clear();
   show("conversation", false);
@@ -665,10 +686,13 @@ function updateVoiceStatus(): void {
     if (pendingEnd) label = "Finishing conversation";
     else if (engine.state.practiceMode) label = "Practice · scripted";
     else if (transport === "text") label = busy ? "Gemini is replying…" : "Text mode · your turn";
-    else label = ({ idle: "Text replies available", connecting: "Connecting to Gemini…", listening: microphoneMuted ? "Mic muted · type a reply" : "Listening to you", speaking: "Speaking", error: "Voice unavailable · type instead" })[voiceStatus];
+    else label = ({ idle: "Text replies available", connecting: "Connecting to Gemini…", listening: liveReplyPending ? "Gemini is replying…" : microphoneMuted ? "Mic muted · type a reply" : "Listening to you", speaking: "Speaking", error: "Voice unavailable · type instead" })[voiceStatus];
   }
   text("voice-status", label);
-  const canAnswer = !!conversationId && !busy && !narrationPending && !pendingEnd && !activeModal && (transport !== "live" || voiceStatus === "listening");
+  const canAnswer = canAnswerConversation({
+    active: !!conversationId, busy, narrating: narrationPending, ending: pendingEnd, paused: !!activeModal,
+    transport, status: voiceStatus, awaitingReply: liveReplyPending,
+  });
   engine.setConversationWaiting(!canAnswer);
   get<HTMLInputElement>("dialogue-input").disabled = !conversationId || busy || pendingEnd;
   get<HTMLButtonElement>("send-reply").disabled = !conversationId || busy || pendingEnd;
@@ -696,13 +720,16 @@ async function toggleMicrophone(): Promise<void> {
     await audioPreparation;
     if (!conversationId || activeModal) return;
     microphoneMuted = false;
+    liveReplyPending = false;
     transport = "live";
+    disconnectVoice();
     intentionalDisconnect = false;
     await voice.connect(engine.getConversationContext(conversationId));
     voice.setMuted(false);
     updateVoiceStatus();
   } catch (error) {
     transport = "text";
+    liveReplyPending = false;
     showProviderError(`Microphone remains unavailable: ${errorMessage(error)} Keep playing by typing.`);
     updateVoiceStatus();
   }
@@ -732,6 +759,7 @@ function switchToPractice(): void {
   encounterVersion += 1;
   textController?.abort();
   busy = false;
+  liveReplyPending = false;
   narrationPending = false;
   director.stop();
   show("provider-banner", false);
@@ -794,6 +822,7 @@ function openModal(id: string): void {
     encounterVersion += 1;
     textController?.abort();
     busy = false;
+    liveReplyPending = false;
     narrationPending = false;
     disconnectVoice();
   }
@@ -965,7 +994,7 @@ function updateHud(): void {
     meter.high = 70;
     meter.optimum = 0;
     meter.textContent = String(Math.round(suspicion));
-    text("suspicion-label", suspicion >= 70 ? "Calling security" : suspicion >= 45 ? "Doubtful" : suspicion >= 25 ? "Curious" : "At ease");
+    text("suspicion-label", suspicion >= SUSPICION_THRESHOLDS.escalate ? "Calling security" : suspicion >= SUSPICION_THRESHOLDS.stall ? "Stalling" : suspicion >= SUSPICION_THRESHOLDS.verify ? "Checking your story" : suspicion >= 25 ? "Curious" : "At ease");
     const remaining = engine.securitySecondsRemaining;
     text("security-timer", remaining === null ? "" : `${Math.ceil(remaining)}s`);
   }
@@ -1024,13 +1053,20 @@ function announce(message: string): void {
   toastTimer = setTimeout(() => show("scene-toast", false), Math.min(10_000, Math.max(4200, message.length * 35)));
 }
 
-function showProviderError(message: string): void {
+function showProviderError(message: string, source: "director" | "connection" = "connection"): void {
+  providerNoticeSource = source;
   text("provider-banner-text", message);
   show("provider-banner", true);
   if (!started) {
     text("provider-state", message);
     get("provider-state").classList.add("error");
   }
+}
+
+function clearProviderError(source: "director" | "connection"): void {
+  if (providerNoticeSource !== source) return;
+  providerNoticeSource = null;
+  show("provider-banner", false);
 }
 
 function addGossip(event: GameEvent): void {
@@ -1158,6 +1194,11 @@ function frame(now: number): void {
   lastFrame = now;
   if (started && engine.state.phase === "playing") {
     engine.tick(dt, input.read());
+    if (conversationId && !engine.state.activeNpcId && !pendingEnd && engine.state.phase === "playing") {
+      const securityWarning = conversationId === "meera" && engine.state.meeraResolved;
+      closeConversation();
+      if (securityWarning) announce("Meera has issued a warning. The records do not justify ending your visit.");
+    }
     if (now - lastHud > 150) {
       updateHud();
       lastHud = now;

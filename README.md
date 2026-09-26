@@ -14,6 +14,8 @@ $env:PORT = "4317"
 npm.cmd run dev
 ```
 
+For a temporary public demo, start a trusted HTTPS tunnel to `127.0.0.1:4317` and set `PUBLIC_ORIGIN` to the exact HTTPS origin it provides before starting the server. The server remains bound to loopback and accepts tunneled browser requests only from that origin; the tunnel must preserve the browser `Origin` header and forward requests with a loopback `Host`. Anyone with the URL can use the demo and its server-side Gemini quota, so stop both the tunnel and server when finished.
+
 `npm.cmd` avoids the PowerShell execution-policy restriction that can affect `npm.ps1`. No system policy change is necessary.
 
 For live Gemini conversations, put your key in the **untracked server-side `.env`** file. If you do not have one yet, copy `.env.example` to `.env` and fill in `GEMINI_API_KEY` locally. Never use a `VITE_`-prefixed key: those variables are intended for client bundles. Do not put credentials in source files, screenshots, saved missions, or browser storage.
@@ -83,7 +85,9 @@ Use the contextual conversation choices for a complete non-AI route. You can als
 
 `src/main.ts` connects the renderer, keyboard/touch input, mission UI, `VoiceClient`, typed dialogue, and the engine. Live tool requests go through engine validation before the result and updated context are sent back. Farewells wait for the voice turn and queued speaker audio to finish before closing the connection.
 
-The high-level Gemini director receives one batched active-floor context approximately every 3–5 seconds. It has one request in flight, a timeout, floor-staleness checks, and exponential backoff with jitter. The animation loop never waits for it. F1 exposes the actual decision source and measured response latency; an API error produces a visible notice and retry/practice controls, not a pretend Gemini fallback.
+The high-level Gemini director receives one batched active-floor context approximately every 3–5 seconds. The server offers canonical actor IDs, actually reachable destinations, and nearby line-of-sight chatter pairs; engaged characters are excluded. The client has one request in flight, a timeout, stale-floor/encounter checks, and exponential backoff with jitter. The animation loop never waits for it. F1 exposes the actual decision source and measured response latency; an API error produces a visible notice and retry/practice controls, not a pretend Gemini fallback.
+
+Natural spoken identity statements are recorded through an identity tool that expands into the existing engine-validated claim actions. Each claim needs its normal engine acknowledgement before Gemini receives the result; registration remains a separate, gated action. Quotes are retained from the actual speech transcription. Meera's allowance also waits through model response generation, and an evidence-based warning closes the call UI automatically.
 
 `server/` keeps credentials and provider SDK calls out of the browser. `server/art.ts` supplies the validated art manifest and bounded asynchronous generation service. The client caches images and prefetches adjacent/previewed floors, not one request per frame.
 

@@ -72,8 +72,11 @@ export class DirectorLoop {
       const reply: unknown = await response.json();
       if (!isDirectorReply(reply)) throw new Error("Gemini returned an invalid director response.");
       this.failures = 0;
-      if (this.running && this.options.enabled() && this.options.context().floor.id === context.floor.id) {
-        this.options.onReply(reply, Math.round(performance.now() - this.lastRequest));
+      if (this.running && this.options.enabled()) {
+        const current = this.options.context();
+        if (current.floor.id === context.floor.id && (current.activeNpcId ?? null) === (context.activeNpcId ?? null)) {
+          this.options.onReply(reply, Math.round(performance.now() - this.lastRequest));
+        }
       }
     } catch (error) {
       if (this.running) {

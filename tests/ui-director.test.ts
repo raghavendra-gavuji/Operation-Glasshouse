@@ -52,6 +52,22 @@ describe("batched Gemini director scheduling", () => {
     loop.stop();
   });
 
+  it.each([["priya", null], [null, "priya"]] as const)("discards a reply when the active encounter changes from %s to %s", async (before, after) => {
+    vi.useFakeTimers();
+    let activeNpcId: string | null = before;
+    let complete!: (response: Response) => void;
+    vi.spyOn(globalThis, "fetch").mockImplementation(() => new Promise<Response>((resolve) => { complete = resolve; }));
+    const onReply = vi.fn();
+    const loop = new DirectorLoop({ context: () => ({ ...context(), activeNpcId }), enabled: () => true, onReply, onError: vi.fn() });
+    loop.start();
+    await vi.advanceTimersByTimeAsync(300);
+    activeNpcId = after;
+    complete(Response.json({ source: "gemini", intents: [], chatter: [] }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(onReply).not.toHaveBeenCalled();
+    loop.stop();
+  });
+
   it("surfaces provider errors and backs off instead of manufacturing scripted replies", async () => {
     vi.useFakeTimers();
     const fetcher = vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ error: "Provider quota exhausted" }, { status: 429 }));
