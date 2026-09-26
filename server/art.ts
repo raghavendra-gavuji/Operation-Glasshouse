@@ -163,6 +163,8 @@ function hasCode(error: unknown, code: string): boolean {
 
 function safeError(error: unknown): ArtError {
   if (error instanceof ArtError) return error;
+  if (hasCode(error, "ENOSPC")) return new ArtError("STORAGE", "The artwork cache is out of disk space.");
+  if (hasCode(error, "EACCES") || hasCode(error, "EPERM")) return new ArtError("STORAGE", "The server cannot access the artwork cache; check its filesystem permissions.");
   if (typeof error === "object" && error !== null && "status" in error && typeof error.status === "number") {
     const status = error.status;
     return new ArtError("PROVIDER", `Gemini image request failed (HTTP ${status}).`, status === 429 || status >= 500);
@@ -287,6 +289,36 @@ function keySprite(data: Buffer, width: number, height: number): { left: number;
   return { left, top, width: right - left + 1, height: bottom - top + 1 };
 }
 
+function despillSprite(data: Buffer, width: number, height: number): void {
+  const contaminated = new Uint8Array(width * height);
+  for (let pixel = 0; pixel < contaminated.length; pixel++) {
+    const i = pixel * 4;
+    const [r, g, b] = data.subarray(i, i + 3);
+    if (data[i + 3] && r > g + 12 && b > g + 10 && Math.min(r, b) > Math.max(r, b) * 0.38) contaminated[pixel] = 1;
+  }
+  const original = Buffer.from(data);
+  for (let pixel = 0; pixel < contaminated.length; pixel++) {
+    if (!contaminated[pixel]) continue;
+    const x = pixel % width;
+    const y = Math.floor(pixel / width);
+    let nearest = -1;
+    let distance = 33;
+    for (let dy = -4; dy <= 4; dy++) {
+      for (let dx = -4; dx <= 4; dx++) {
+        if (x + dx < 0 || x + dx >= width || y + dy < 0 || y + dy >= height) continue;
+        const candidate = (y + dy) * width + x + dx;
+        const squared = dx * dx + dy * dy;
+        if (!contaminated[candidate] && original[candidate * 4 + 3] && squared < distance) {
+          nearest = candidate;
+          distance = squared;
+        }
+      }
+    }
+    if (nearest < 0) data.fill(0, pixel * 4, pixel * 4 + 4);
+    else original.copy(data, pixel * 4, nearest * 4, nearest * 4 + 4);
+  }
+}
+
 function sealTextureEdges(data: Buffer, width: number, height: number, channels: number): void {
   const blend = (first: number, last: number, weight: number) => {
     for (let channel = 0; channel < channels; channel++) {
@@ -322,8 +354,10 @@ export async function prepareAssetImage(spec: AssetSpec, image: GeneratedImage):
     const width = Math.max(2, Math.round(bounds.width * scale)) * 2;
     const height = Math.max(2, Math.round(bounds.height * scale)) * 2;
     const body = await sharp(data, { raw: info }).extract(bounds)
-      .resize(width / 2, height / 2, { kernel: "nearest", fit: "fill" }).png().toBuffer();
-    const pixels = await sharp(body).resize(width, height, { kernel: "nearest" }).png().toBuffer();
+      .resize(width / 2, height / 2, { kernel: "nearest", fit: "fill" }).raw().toBuffer({ resolveWithObject: true });
+    // Dark magenta survives a brightness-only chroma key; borrow nearby real body colors, not invented outlines.
+    despillSprite(body.data, body.info.width, body.info.height);
+    const pixels = await sharp(body.data, { raw: body.info }).resize(width, height, { kernel: "nearest" }).png().toBuffer();
     return sharp({ create: { width: spec.width, height: spec.height, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
       .composite([{ input: pixels, left: Math.floor((spec.width - width) / 2), top: SPRITE_FOOT_Y - height }])
       .png({ palette: true, colours: 96, dither: 0, compressionLevel: 9 }).toBuffer();
@@ -370,8 +404,9 @@ async function recoverDeadLock(path: string): Promise<void> {
     try {
       owner = JSON.parse(await readFile(join(path, "owner.json"), "utf8"));
     } catch (error) {
-      if (!hasCode(error, "ENOENT")) throw error;
+      if (!hasCode(error, "ENOENT") && !(error instanceof SyntaxError)) throw error;
       if (Date.now() - (await lstat(path)).mtimeMs < 10_000) return;
+      if (error instanceof SyntaxError) throw new ArtError("LOCK_INVALID", "An artwork lock has invalid ownership metadata; stop asset processes before clearing it.");
     }
     if (typeof owner === "object" && owner !== null && "pid" in owner && typeof owner.pid === "number" && processAlive(owner.pid)) return;
     const abandoned = `${path}.${randomUUID()}.abandoned`;
@@ -423,6 +458,21 @@ async function withLock<T>(directory: string, name: string, timeoutMs: number, o
       }
     }
   }
+}
+
+async function withGenerationSlot<T>(directory: string, timeoutMs: number, operation: () => Promise<T>): Promise<T> {
+  const started = Date.now();
+  while (Date.now() - started <= timeoutMs) {
+    for (let slot = 0; slot < MAX_WORKERS; slot++) {
+      try {
+        return await withLock(directory, `worker-${slot}`, 0, operation);
+      } catch (error) {
+        if (!(error instanceof ArtError) || error.code !== "LOCK_TIMEOUT") throw error;
+      }
+    }
+    await sleep(40);
+  }
+  throw new ArtError("QUEUE_TIMEOUT", "The two shared artwork workers are still busy; retry after current generation finishes.");
 }
 
 export type ImageGenerator = (spec: AssetSpec, reference: Buffer | undefined, signal: AbortSignal) => Promise<GeneratedImage>;
@@ -563,7 +613,8 @@ export function createAssetService(options: ArtServiceOptions = {}) {
       const referenceRecord = manifest.assets.find((asset) => asset.id === spec.referenceId);
       const reference = referenceRecord ? await readFile(join(directory, basename(referenceRecord.url))) : undefined;
       logger.info(`[art] Generating ${id}.`);
-      const image = await requestImage(spec, reference);
+      // File-backed slots also bound API + CLI concurrency when both processes use the same cache.
+      const image = await withGenerationSlot(directory, timeoutMs * MAX_ATTEMPTS + 30_000, () => requestImage(spec, reference));
       const pixels = await prepareAssetImage(spec, image);
       const filename = `${id}-${createHash("sha256").update(pixels).digest("hex").slice(0, 16)}.png`;
       const asset: AssetRecord = { id, kind: spec.kind, url: `/generated/${filename}`, model: image.model, generatedAt: new Date().toISOString() };

@@ -1,5 +1,5 @@
 import { GenerateContentResponse, FinishReason, BlockedReason } from "@google/genai";
-import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import sharp from "sharp";
@@ -34,12 +34,14 @@ async function spriteSource(): Promise<GeneratedImage> {
   const torso = await sharp({ create: { width: 92, height: 220, channels: 4, background: "#25464d" } }).png().toBuffer();
   const head = await sharp({ create: { width: 70, height: 66, channels: 4, background: "#b88861" } }).png().toBuffer();
   const shoe = await sharp({ create: { width: 45, height: 28, channels: 4, background: "#71533f" } }).png().toBuffer();
+  const darkSpill = await sharp({ create: { width: 12, height: 90, channels: 4, background: "#5d035a" } }).png().toBuffer();
   const bytes = await sharp({ create: { width: 320, height: 480, channels: 4, background: "#ff00ff" } })
     .composite([
       { input: torso, left: 114, top: 160 },
       { input: head, left: 125, top: 96 },
       { input: shoe, left: 107, top: 376 },
       { input: shoe, left: 170, top: 376 },
+      { input: darkSpill, left: 202, top: 220 },
     ]).png().toBuffer();
   return { bytes, mimeType: "image/png", model: "test-image" };
 }
@@ -120,7 +122,7 @@ describe("game-ready pixel processing", () => {
         bottom = y;
         left = Math.min(left, x);
         right = Math.max(right, x);
-        if (data[i] > data[i + 1] + 60 && data[i + 2] > data[i + 1] + 60) magenta++;
+        if (data[i] > data[i + 1] + 12 && data[i + 2] > data[i + 1] + 10) magenta++;
       }
     }
     expect(bottom).toBe(139);
@@ -240,6 +242,17 @@ describe("resumable manifest and constrained publication", () => {
       { id: "portrait-priya", reference: true },
     ]);
   });
+
+  it("recovers a dead process's asset lock rather than blocking resumable generation", async () => {
+    const path = await directory();
+    const lock = join(path, ".locks", "floor-1");
+    await mkdir(lock, { recursive: true });
+    await writeFile(join(lock, "owner.json"), JSON.stringify({ pid: 2_147_483_647 }));
+    const service = createAssetService({ directory: path, generate: async () => source, logger: silent });
+    const result = await service.generateAssets(["floor-1"]);
+    expect(result.assets.map(({ id }) => id)).toEqual(["floor-1"]);
+    expect(await readdir(join(path, ".locks"))).toEqual([]);
+  });
 });
 
 describe("bounded nonblocking floor queue", () => {
@@ -285,12 +298,20 @@ describe("bounded nonblocking floor queue", () => {
 
   it("deduplicates across independent services and merges simultaneous manifest updates without loss", async () => {
     const path = await directory();
-    const generate = vi.fn(async () => { await delay(30); return source; });
+    let active = 0;
+    let maximum = 0;
+    const generate = vi.fn(async () => {
+      maximum = Math.max(maximum, ++active);
+      await delay(60);
+      active--;
+      return source;
+    });
     const first = createAssetService({ directory: path, generate, logger: silent });
     const second = createAssetService({ directory: path, generate, logger: silent });
     await Promise.all([first.scheduleFloorAssets([1, 2]), second.scheduleFloorAssets([1, 3])]);
     await Promise.all([first.waitForIdle(), second.waitForIdle()]);
     expect(generate).toHaveBeenCalledTimes(3);
+    expect(maximum).toBeLessThanOrEqual(2);
     expect((await first.readAssets()).assets.map(({ id }) => id)).toEqual(["floor-1", "floor-2", "floor-3"]);
     expect(await readdir(join(path, ".locks"))).toEqual([]);
   });

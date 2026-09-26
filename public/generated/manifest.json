@@ -10,11 +10,214 @@
     },
     {
       "id": "portrait-ghost",
-      "kind": "portrait",
       "url": "/generated/portrait-ghost-f0852f0b2e342b35.png",
+      "kind": "portrait",
       "model": "gemini-3.1-flash-lite-image",
       "generatedAt": "2026-09-26T08:44:55.510Z"
+    },
+    {
+      "id": "portrait-priya",
+      "url": "/generated/portrait-priya-d6100fa5c681e983.png",
+      "kind": "portrait",
+      "model": "gemini-3.1-flash-lite-image",
+      "generatedAt": "2026-09-26T08:47:36.828Z"
+    },
+    {
+      "id": "portrait-ramesh",
+      "url": "/generated/portrait-ramesh-d172a4616a582302.png",
+      "kind": "portrait",
+      "model": "gemini-3.1-flash-lite-image",
+      "generatedAt": "2026-09-26T08:47:36.989Z"
+    },
+    {
+      "id": "portrait-dev",
+      "url": "/generated/portrait-dev-80f6d6410943e9b7.png",
+      "kind": "portrait",
+      "model": "gemini-3.1-flash-lite-image",
+      "generatedAt": "2026-09-26T08:47:40.149Z"
+    },
+    {
+      "id": "portrait-anita",
+      "url": "/generated/portrait-anita-2363f19122d839f3.png",
+      "kind": "portrait",
+      "model": "gemini-3.1-flash-lite-image",
+      "generatedAt": "2026-09-26T08:47:40.390Z"
+    },
+    {
+      "id": "portrait-kulkarni",
+      "url": "/generated/portrait-kulkarni-e6acff550413896f.png",
+      "kind": "portrait",
+      "model": "gemini-3.1-flash-lite-image",
+      "generatedAt": "2026-09-26T08:47:44.249Z"
+    },
+    {
+      "id": "portrait-meera",
+      "url": "/generated/portrait-meera-e5cd46f36f18d72c.png",
+      "kind": "portrait",
+      "model": "gemini-3.1-flash-lite-image",
+      "generatedAt": "2026-09-26T08:47:43.929Z"
+    },
+    {
+      "id": "portrait-handler",
+      "url": "/generated/portrait-handler-6e8da966bdac0c6c.png",
+      "kind": "portrait",
+      "model": "gemini-3.1-flash-lite-image",
+      "generatedAt": "2026-09-26T08:47:47.341Z"
+    },
+    {
+      "id": "sprite-ghost",
+      "url": "/generated/sprite-ghost-9bd6f4ab1bd238c6.png",
+      "kind": "sprite",
+      "model": "gemini-3.1-flash-lite-image",
+      "generatedAt": "2026-09-26T08:47:47.963Z"
+    },
+    {
+      "id": "sprite-priya",
+      "url": "/generated/sprite-priya-00b483d4d877a32d.png",
+      "kind": "sprite",
+      "model": "gemini-3.1-flash-lite-image",
+      "generatedAt": "2026-09-26T08:47:52.544Z"
+    },
+    {
+      "id": "sprite-ramesh",
+      "url": "/generated/sprite-ramesh-e667e6dd51ec8628.png",
+      "kind": "sprite",
+      "model": "gemini-3.1-flash-lite-image",
+      "generatedAt": "2026-09-26T08:47:52.060Z"
+    },
+    {
+      "id": "sprite-dev",
+      "url": "/generated/sprite-dev-a9b48b74b67bb0c7.png",
+      "kind": "sprite",
+      "model": "gemini-3.1-flash-lite-image",
+      "generatedAt": "2026-09-26T08:47:56.198Z"
+    },
+    {
+      "id": "sprite-anita",
+      "url": "/generated/sprite-anita-efec40aeeb725ca9.png",
+      "kind": "sprite",
+      "model": "gemini-3.1-flash-lite-image",
+      "generatedAt": "2026-09-26T08:47:56.564Z"
+    },
+    {
+      "id": "sprite-kulkarni",
+      "url": "/generated/sprite-kulkarni-acacf2d510ee1731.png",
+      "kind": "sprite",
+      "model": "gemini-3.1-flash-lite-image",
+      "generatedAt": "2026-09-26T08:48:00.849Z"
+    },
+    {
+      "id": "sprite-meera",
+      "url": "/generated/sprite-meera-3ad211baeb33055b.png",
+      "kind": "sprite",
+      "model": "gemini-3.1-flash-lite-image",
+      "generatedAt": "2026-09-26T08:48:01.087Z"
+    },
+    {
+      "id": "floor-1",
+      "url": "/generated/floor-1-8db89c8c94b9dbaf.png",
+      "kind": "floor",
+      "model": "gemini-3.1-flash-lite-image",
+      "generatedAt": "2026-09-26T08:47:05.667Z"
+    },
+    {
+      "id": "floor-2",
+      "url": "/generated/floor-2-be2e8bbefe0be872.png",
+      "kind": "floor",
+      "model": "gemini-3.1-flash-lite-image",
+      "generatedAt": "2026-09-26T08:47:05.548Z"
+    },
+    {
+      "id": "floor-3",
+      "url": "/generated/floor-3-c732499b23879eff.png",
+      "kind": "floor",
+      "model": "gemini-3.1-flash-lite-image",
+      "generatedAt": "2026-09-26T08:47:09.473Z"
+    },
+    {
+      "id": "floor-4",
+      "url": "/generated/floor-4-52b903d0415a3cd2.png",
+      "kind": "floor",
+      "model": "gemini-3.1-flash-lite-image",
+      "generatedAt": "2026-09-26T08:47:10.209Z"
+    },
+    {
+      "id": "floor-5",
+      "url": "/generated/floor-5-33b6e5543449104d.png",
+      "kind": "floor",
+      "model": "gemini-3.1-flash-lite-image",
+      "generatedAt": "2026-09-26T08:47:13.715Z"
+    },
+    {
+      "id": "floor-6",
+      "url": "/generated/floor-6-ea2ba8c7ac7c54ef.png",
+      "kind": "floor",
+      "model": "gemini-3.1-flash-lite-image",
+      "generatedAt": "2026-09-26T08:47:14.306Z"
+    },
+    {
+      "id": "floor-7",
+      "url": "/generated/floor-7-883520d2164d5f8a.png",
+      "kind": "floor",
+      "model": "gemini-3.1-flash-lite-image",
+      "generatedAt": "2026-09-26T08:47:18.052Z"
+    },
+    {
+      "id": "floor-8",
+      "url": "/generated/floor-8-89b73df22bccb826.png",
+      "kind": "floor",
+      "model": "gemini-3.1-flash-lite-image",
+      "generatedAt": "2026-09-26T08:47:18.682Z"
+    },
+    {
+      "id": "floor-9",
+      "url": "/generated/floor-9-a47153f8f580e568.png",
+      "kind": "floor",
+      "model": "gemini-3.1-flash-lite-image",
+      "generatedAt": "2026-09-26T08:47:23.352Z"
+    },
+    {
+      "id": "floor-10",
+      "url": "/generated/floor-10-968a2d8d987bfa40.png",
+      "kind": "floor",
+      "model": "gemini-3.1-flash-lite-image",
+      "generatedAt": "2026-09-26T08:47:23.197Z"
+    },
+    {
+      "id": "floor-11",
+      "url": "/generated/floor-11-31d8144a7015bcbd.png",
+      "kind": "floor",
+      "model": "gemini-3.1-flash-lite-image",
+      "generatedAt": "2026-09-26T08:47:32.111Z"
+    },
+    {
+      "id": "floor-12",
+      "url": "/generated/floor-12-2ae9c58d744537d3.png",
+      "kind": "floor",
+      "model": "gemini-3.1-flash-lite-image",
+      "generatedAt": "2026-09-26T08:47:27.552Z"
+    },
+    {
+      "id": "texture-floor",
+      "url": "/generated/texture-floor-ba91988b0bd879d8.png",
+      "kind": "texture",
+      "model": "gemini-3.1-flash-lite-image",
+      "generatedAt": "2026-09-26T08:46:57.325Z"
+    },
+    {
+      "id": "texture-carpet",
+      "kind": "texture",
+      "url": "/generated/texture-carpet-d6effac9ce82c8bd.png",
+      "model": "gemini-3.1-flash-lite-image",
+      "generatedAt": "2026-09-26T08:49:32.740Z"
+    },
+    {
+      "id": "texture-wall",
+      "url": "/generated/texture-wall-e4f83e8a1ad84461.png",
+      "kind": "texture",
+      "model": "gemini-3.1-flash-lite-image",
+      "generatedAt": "2026-09-26T08:47:00.423Z"
     }
   ],
-  "status": "partial"
+  "status": "ready"
 }
