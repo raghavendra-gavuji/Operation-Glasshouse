@@ -131,6 +131,24 @@ export class GameEngine {
     this.onFloorChange?.(this.state.floor);
   }
 
+  setPracticeMode(enabled: boolean): void {
+    if (typeof enabled !== "boolean") throw new TypeError("Practice mode must be a boolean.");
+    if (this.state.phase === "ended") {
+      this.reject("A finished mission keeps its dialogue-mode label. Choose the mode when starting a new run.");
+      return;
+    }
+    if (this.state.practiceMode === enabled) return;
+    this.state.practiceMode = enabled;
+    this.setConversationClockRunning(false);
+    this.emit("system", enabled
+      ? "Practice mode enabled explicitly. Mission progress and the active conversation are retained; dialogue is not a Gemini response."
+      : "Live dialogue mode selected. Await the provider connection before enabling answer time; mission progress is retained.");
+  }
+
+  enablePracticeMode(): void {
+    this.setPracticeMode(true);
+  }
+
   setPaused(paused: boolean): void {
     if (typeof paused !== "boolean") throw new TypeError("Pause state must be a boolean.");
     this.state.paused = paused;
@@ -265,6 +283,11 @@ export class GameEngine {
       ).slice(-40).map((event) => ({ ...event })),
       alert: this.securityAlert,
     };
+  }
+
+  getDebugPaths(): Record<string, Point[]> {
+    return Object.fromEntries(this.state.npcs.filter((npc) => npc.floor === this.state.floor)
+      .map((npc) => [npc.id, this.runtime.actors[npc.id].path.map((point) => ({ ...point }))]));
   }
 
   getConversationContext(npcId: string): ConversationContext {

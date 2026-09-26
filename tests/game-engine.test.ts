@@ -172,6 +172,50 @@ describe("mission rules and capabilities", () => {
     expect(engine.state.settings.reducedMotion).toBe(true);
   });
 
+  it("switches explicitly to practice after provider failure without losing mission progress or security answer time", () => {
+    const engine = game();
+    engine.setPracticeMode(false);
+    register(engine);
+    authorize(engine);
+    securityCall(engine);
+    engine.setConversationClockRunning(true);
+    advance(engine, 4);
+    const cover = { ...engine.state.cover };
+    const ledger = structuredClone(engine.state.ledger);
+    const authorization = { ...engine.state.authorization };
+    const elapsed = engine.state.elapsedSeconds;
+    const remaining = engine.securitySecondsRemaining;
+    const context = engine.getConversationContext("meera");
+    engine.enablePracticeMode();
+    expect(engine.state.practiceMode).toBe(true);
+    expect(engine.state.visitorLog).toBe(ALIAS);
+    expect(engine.state.authorization).toEqual(authorization);
+    expect(engine.state.cover).toEqual(cover);
+    expect(engine.state.ledger).toEqual(ledger);
+    expect(engine.state.elapsedSeconds).toBe(elapsed);
+    expect(engine.state.activeNpcId).toBe("meera");
+    expect(engine.securitySecondsRemaining).toBe(remaining);
+    expect(engine.conversationClockRunning).toBe(false);
+    expect(engine.getConversationContext("meera")).toEqual(context);
+    advance(engine, 2);
+    expect(engine.securitySecondsRemaining).toBe(remaining);
+    engine.setPracticeMode(false);
+    expect(engine.state.practiceMode).toBe(false);
+    expect(engine.state.activeNpcId).toBe("meera");
+    expect(() => engine.setPracticeMode(JSON.parse('"invalid"'))).toThrow(TypeError);
+  });
+
+  it("does not relabel a finished mission when a late provider failure arrives", () => {
+    const engine = game();
+    reachExit(engine);
+    engine.exitBuilding();
+    engine.setPracticeMode(false);
+    expect(engine.state.practiceMode).toBe(true);
+    expect(engine.state.ending).toBe("clock-out");
+    engine.start(false);
+    expect(engine.state.practiceMode).toBe(false);
+  });
+
   it("requires Priya's complete fictional cover and forbids real callbacks and IDs", () => {
     const engine = game();
     talk(engine, "priya");
@@ -767,6 +811,33 @@ describe("real-time movement, encounters, and validated direction", () => {
     expect(other.memory).toContain("The next appointment is at ten.");
     expect(npc(engine, "dev").memory).toBe("");
     expect(engine.state.ledger).toEqual([]);
+  });
+
+  it("exposes deep-copied actual debug routes on the active floor only", () => {
+    const engine = game();
+    const initial = engine.getDebugPaths();
+    expect(Object.keys(initial)).toHaveLength(6);
+    expect(initial.priya).toEqual([]);
+    expect(initial.dev).toBeUndefined();
+    expect(initial.meera).toBeUndefined();
+    engine.applyDirector({
+      source: "gemini",
+      intents: [{ npcId: "priya", action: "walk_to", target: { x: 14.5, y: 21.5 }, reason: "Use this real route for the debug overlay." }],
+      chatter: [],
+    });
+    const paths = engine.getDebugPaths();
+    expect(paths.priya.length).toBeGreaterThan(0);
+    const originalFirst = { ...paths.priya[0] };
+    expect(distance(npc(engine, "priya"), originalFirst)).toBeGreaterThan(0);
+    paths.priya[0].x = 999;
+    paths.priya.push({ x: 999, y: 999 });
+    expect(engine.getDebugPaths().priya[0]).toEqual(originalFirst);
+    expect(engine.getDebugPaths().priya).not.toBe(paths.priya);
+    engine.tick(0.1, { x: 0, y: 0 });
+    expect(canOccupy(engine.floors[0], npc(engine, "priya"))).toBe(true);
+    expect(engine.changeFloor(2)).toBe(true);
+    expect(engine.getDebugPaths().priya).toBeUndefined();
+    expect(engine.getDebugPaths().ramesh).toEqual([]);
   });
 
   it("treats witnessed restricted-room entry as evidence but does not accumulate violations while a conversation immobilizes the player", () => {

@@ -35,6 +35,15 @@ onEnding?: (ending: Ending) => void
 
 Additional engine API:
 
+- `setPracticeMode(enabled: boolean): void` changes dialogue mode explicitly
+  without resetting mission progress or closing the active conversation.
+  `enablePracticeMode(): void` is its `true` convenience alias. Mode transitions
+  hold Meera's answer clock until the new input surface is ready. Finished
+  missions keep their mode label; use `start(practiceMode)` for a new run.
+- `getDebugPaths(): Record<string, Point[]>` returns deep-cloned remaining routes
+  for the active floor only. Idle actors have empty arrays. Draw from each
+  actor's current position to these waypoints; the current position is not
+  prepended. These are actual simulation routes, not hypothetical reachability.
 - `canUseElevator: boolean`, `canExit: boolean` are read-only proximity queries.
 - `securitySecondsRemaining: number | null` is the live incoming-call allowance.
 - `setConversationClockRunning(running: boolean): void` enables that allowance
