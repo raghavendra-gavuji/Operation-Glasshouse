@@ -1,0 +1,157 @@
+<!doctype html>
+<!--
+THESIS: An office you can disappear into, not a dashboard about a heist.
+OWN-WORLD: Sandstone pixels, jade partitions, burgundy files and amber afternoon light. Hard-edged paper controls; condensed poster lettering.
+STORY: Become Ghost. Keep one invented identity, listen to the people inside Meridian Tower, collect a visitor card, and decide whom to trust.
+FIRST VIEWPORT: A generated tower illustration fills the screen. Oversized title at left, Ghost at right, one Start mission action low on the left. In play the office occupies the viewport, with a narrow paper dossier.
+FORM: User-pinned immersive isometric diorama, not a generated template or concept roll. The camera follows Ghost; conversations arrive inside the world.
+-->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#182c29" />
+    <meta name="description" content="A fictional, voice-driven social-stealth game inside Meridian Tower. One cover identity. Twelve floors. Five ways out." />
+    <title>Operation Glasshouse</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <main id="app">
+      <canvas id="world" aria-label="Isometric office. Move with WASD or arrow keys. Nearby people approach and start conversations automatically.">
+        Operation Glasshouse requires a browser with Canvas support.
+      </canvas>
+      <section id="opening" aria-labelledby="game-title">
+        <img id="exterior-image" class="exterior-image" alt="" hidden />
+        <div class="opening-shade"></div>
+        <div class="opening-copy">
+          <h1 id="game-title"><span>Operation</span><span>Glasshouse<span class="title-period">.</span></span></h1>
+          <p class="opening-hook">Everyone has a story.<br>Make sure yours holds.</p>
+          <p class="opening-description">A social-stealth game in twelve floors.<br>Walk in as nobody. Talk your way out as someone else.</p>
+          <div class="start-actions">
+            <button id="start-live" class="button button-amber button-start"><span>Start mission</span><span aria-hidden="true">↗</span></button>
+            <button id="resume-button" class="button button-paper" hidden>Resume mission</button>
+            <button id="start-practice" class="text-button light">Practice without AI</button>
+          </div>
+          <p id="provider-state" class="provider-state" role="status">Checking the Gemini uplink…</p>
+          <p class="opening-permissions">Start enables sound and asks for your microphone.<br>Typing works too. Camera stays off unless you enable it.</p>
+        </div>
+        <div class="opening-ghost" aria-hidden="true">
+          <img id="ghost-poster" alt="" hidden />
+          <span class="ghost-caption">GHOST<span>VISITOR / UNVERIFIED</span></span>
+        </div>
+        <footer class="opening-footer">
+          <p>Meridian Tower<span>Financial District · Hyderabad</span></p>
+          <p class="opening-controls"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move <span>Speak to keep your cover.</span></p>
+          <span class="fiction-tag">A fictional operation</span>
+        </footer>
+        <p id="art-status" class="art-status" role="status"></p>
+      </section>
+
+      <header id="topbar" class="topbar" hidden>
+        <div class="floor-display"><span id="floor-number" class="floor-number">01</span><div><strong id="floor-name">Reception</strong><span id="floor-subtitle">Meridian Tower</span></div></div>
+        <div class="topbar-center"><span class="clock-dot" aria-hidden="true"></span><time id="clock">09:00</time><span id="mode-label">LIVE MISSION</span></div>
+        <nav class="game-tools" aria-label="Mission controls">
+          <button id="sound-button" class="tool-button" aria-label="Mute sound" aria-pressed="false">Sound on</button>
+          <button id="ledger-button" class="tool-button">Ledger <kbd>L</kbd></button>
+          <button id="settings-button" class="tool-button" aria-label="Open settings">Settings</button>
+          <button id="pause-button" class="tool-button" aria-label="Pause mission">Ⅱ</button>
+        </nav>
+      </header>
+
+      <aside id="dossier" class="dossier" aria-label="Mission dossier" hidden>
+        <div class="dossier-heading"><h2>Your cover</h2><span class="paper-clip" aria-hidden="true"></span></div>
+        <div class="visitor-pass">
+          <img id="cover-portrait" alt="Ghost" hidden />
+          <div class="visitor-identity"><span class="visitor-label">MERIDIAN / VISITOR</span><strong id="cover-name">Name unknown</strong><span id="cover-company">No story on file</span></div>
+          <span id="pass-stamp" class="pass-stamp">UNVERIFIED</span>
+        </div>
+        <h3 class="objective-title">Leave with a keycard.</h3>
+        <ol class="objectives" aria-label="Mission prerequisites">
+          <li id="objective-log"><span class="check-box" aria-hidden="true"></span><div><strong>Get on the visitor log</strong><span>Priya · Reception · 01</span></div></li>
+          <li id="objective-auth"><span class="check-box" aria-hidden="true"></span><div><strong>Secure an authorization</strong><span>Dev · IT · 04 / Anita · 11</span></div></li>
+          <li id="objective-card"><span class="check-box" aria-hidden="true"></span><div><strong>Collect the keycard</strong><span>Ramesh · Collection · 02</span></div></li>
+        </ol>
+        <p id="mission-hint" class="mission-hint">The same name needs to appear on both pieces of paper.</p>
+        <div class="dossier-rule"></div>
+        <div class="handler-note"><span class="note-label">From the Handler</span><p id="handler-note">“Keep it simple. Be pleasant. People remember a good story.”</p></div>
+        <button id="briefing-replay" class="text-button">Listen to the briefing</button>
+        <div id="connection-readout" class="connection-readout"><span class="status-led" aria-hidden="true"></span><span id="connection-text">Waiting for an encounter</span></div>
+        <button id="debug-button" class="text-button subtle">Decision log <kbd>F1</kbd></button>
+      </aside>
+
+      <div id="provider-banner" class="provider-banner" role="status" hidden>
+        <span id="provider-banner-text"></span>
+        <button id="retry-provider" class="text-button">Retry Gemini</button>
+        <button id="switch-practice" class="text-button">Use practice mode</button>
+        <button id="dismiss-banner" class="close-button" aria-label="Dismiss notice">×</button>
+      </div>
+
+      <div id="scene-toast" class="scene-toast" role="status" hidden></div>
+      <div id="floor-arrival" class="floor-arrival" hidden><span id="arrival-number"></span><div><strong id="arrival-name"></strong><span id="arrival-subtitle"></span></div></div>
+      <div id="gossip-feed" class="gossip-feed" aria-live="polite" aria-label="Things happening in the building"></div>
+      <div id="nearby-actions" class="nearby-actions" hidden>
+        <button id="elevator-button" class="button button-paper" hidden>Choose a floor <kbd>↵</kbd></button>
+        <button id="exit-button" class="button button-paper" hidden>Leave the building</button>
+        <button id="double-cross-button" class="button button-burgundy" hidden>Call Meera about the Handler</button>
+      </div>
+      <div id="movement-hint" class="movement-hint" hidden><span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / arrows to walk</span><span><kbd>Shift</kbd> to run</span><span>People will approach you.</span></div>
+      <div id="touch-controls" class="touch-controls" aria-label="Movement controls" hidden>
+        <button data-move="up" aria-label="Walk up">↑</button><button data-move="left" aria-label="Walk left">←</button><button data-move="down" aria-label="Walk down">↓</button><button data-move="right" aria-label="Walk right">→</button>
+      </div>
+
+      <section id="conversation" class="conversation" aria-labelledby="speaker-name" hidden>
+        <div class="speaker-portrait"><img id="speaker-portrait" alt="" hidden /><span id="speaker-initials" aria-hidden="true"></span></div>
+        <div class="conversation-body">
+          <div class="speaker-heading"><div><h2 id="speaker-name"></h2><span id="speaker-role"></span></div><div class="conversation-status"><span id="voice-indicator" aria-hidden="true"></span><span id="voice-status">Connecting…</span></div></div>
+          <p id="npc-caption" class="npc-caption" aria-live="polite" aria-atomic="true"></p>
+          <p id="player-caption" class="player-caption"></p>
+          <div id="suspicion-readout" class="suspicion-readout"><span>Character suspicion</span><meter id="suspicion-meter" min="0" max="100" value="0">0</meter><span id="suspicion-label">At ease</span></div>
+          <form id="dialogue-form" class="dialogue-form"><label for="dialogue-input" class="sr-only">Your spoken or typed reply</label><input id="dialogue-input" name="reply" placeholder="Speak naturally, or type your reply…" maxlength="1600" autocomplete="off" /><button id="send-reply" type="submit" class="button button-jade">Send <span aria-hidden="true">↗</span></button></form>
+          <div id="practice-options" class="practice-options" hidden></div>
+          <div class="conversation-footer"><button id="mic-button" class="text-button">Microphone on</button><button id="leave-conversation" class="text-button">Leave conversation</button><span id="conversation-mode-note">Fictional interpretation of your story, not a lie detector.</span></div>
+        </div>
+      </section>
+
+      <div id="security-overlay" class="security-overlay" hidden><span class="security-phone" aria-hidden="true">▥</span><div><strong>Security is on the line.</strong><p>Meera wants your version of events.</p></div><span id="security-timer" class="security-timer"></span></div>
+
+      <aside id="debug-panel" class="debug-panel" aria-label="AI decision log" hidden><div><h2>Decision log</h2><button id="debug-close" class="close-button" aria-label="Close decision log">×</button></div><p>Paths: local A*. Decisions: source shown per request.</p><ol id="debug-entries"></ol></aside>
+
+      <dialog id="elevator-dialog" class="paper-dialog elevator-dialog" aria-labelledby="elevator-title">
+        <div class="dialog-heading"><h2 id="elevator-title">Going up?</h2><button data-close="elevator-dialog" class="close-button" aria-label="Close floor selector">×</button></div><p class="dialog-intro">Meridian Tower · Passenger lift</p><div id="floor-list" class="floor-list"></div><p class="dialog-footnote">↑ ↓ to select · Enter to travel · Esc to stay</p>
+      </dialog>
+
+      <dialog id="ledger-dialog" class="paper-dialog ledger-dialog" aria-labelledby="ledger-title">
+        <div class="dialog-heading"><h2 id="ledger-title">The story so far.</h2><button data-close="ledger-dialog" class="close-button" aria-label="Close story ledger">×</button></div>
+        <p class="dialog-intro">Exact claims. Real witnesses. Fictional consequences.</p>
+        <nav class="ledger-tabs" aria-label="Ledger sections"><button data-ledger="claims" aria-pressed="true">Your story</button><button data-ledger="facts" aria-pressed="false">Things you know</button><button data-ledger="rumors" aria-pressed="false">Word travels</button><button data-ledger="transcripts" aria-pressed="false">Conversations</button></nav>
+        <div id="ledger-content" class="ledger-content"></div>
+      </dialog>
+
+      <dialog id="settings-dialog" class="paper-dialog settings-dialog" aria-labelledby="settings-title">
+        <div class="dialog-heading"><h2 id="settings-title">Make yourself comfortable.</h2><button data-close="settings-dialog" class="close-button" aria-label="Close settings">×</button></div>
+        <label class="setting-row"><span>Speaker volume</span><input id="volume-input" type="range" min="0" max="1" step="0.05" value="0.8" /></label>
+        <label class="setting-row"><span>Captions <small>Keep spoken dialogue visible</small></span><input id="captions-input" type="checkbox" checked /></label>
+        <label class="setting-row"><span>Reduced motion <small>No camera easing or arrival animation</small></span><input id="motion-input" type="checkbox" /></label>
+        <label class="setting-row"><span>Optional camera <small>Off by default. Separate permission required.</small></span><input id="camera-input" type="checkbox" /></label>
+        <p id="camera-status" class="settings-note">Camera off. No facial analysis or honesty scoring.</p>
+        <p class="settings-note">Gemini hears enabled microphone audio and receives enabled camera frames during conversations. No recording is saved by this app. The story ledger and text transcripts are saved on this device.</p>
+        <p class="settings-note">NPC suspicion is a fictional reaction to claims and events. It does not measure your real honesty, accent, gaze, speaking speed, or emotions.</p>
+        <button id="reset-button" class="text-button danger">Erase local mission progress</button>
+        <div id="reset-confirm" class="reset-confirm" hidden><p>Erase this device’s saved mission and start over?</p><button id="confirm-reset" class="button button-burgundy">Erase and restart</button><button id="cancel-reset" class="text-button">Keep mission</button></div>
+      </dialog>
+
+      <dialog id="pause-dialog" class="paper-dialog pause-dialog" aria-labelledby="pause-title">
+        <h2 id="pause-title">Out of office.</h2><p>The building can wait. Your mission clock is paused.</p>
+        <button id="resume-play" class="button button-jade">Back to the mission <span aria-hidden="true">↗</span></button>
+        <button id="pause-save" class="text-button">Save and return to title</button>
+      </dialog>
+
+      <section id="mission-report" class="mission-report" aria-labelledby="report-title" hidden>
+        <div class="report-art"><img id="report-portrait" alt="" hidden /><span class="report-seal">MERIDIAN TOWER<br>INCIDENT FILE</span></div>
+        <div class="report-body"><h1 id="report-title"></h1><p id="report-description" class="report-description"></p><div class="report-rank"><span>Field assessment</span><strong id="report-rank"></strong></div><div id="report-summary"></div><div class="report-actions"><button id="report-ledger" class="button button-paper">Read the mission record</button><button id="replay-button" class="button button-amber">Another identity <span aria-hidden="true">↗</span></button></div><p class="report-note">A score for this fictional operation, never a judgment of you.</p></div>
+      </section>
+      <div id="screen-reader-events" class="sr-only" aria-live="polite" aria-atomic="true"></div>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
