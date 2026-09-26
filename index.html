@@ -73,7 +73,7 @@ FORM: User-pinned immersive isometric diorama, not a generated template or conce
         </ol>
         <p id="mission-hint" class="mission-hint">The same name needs to appear on both pieces of paper.</p>
         <div class="dossier-rule"></div>
-        <div class="handler-note"><span class="note-label">From the Handler</span><p id="handler-note">“Keep it simple. Be pleasant. People remember a good story.”</p></div>
+        <div class="handler-note"><span class="note-label">From the Handler</span><p id="handler-note" tabindex="0">“Keep it simple. Be pleasant. People remember a good story.”</p></div>
         <button id="briefing-replay" class="text-button">Listen to the briefing</button>
         <div id="connection-readout" class="connection-readout"><span class="status-led" aria-hidden="true"></span><span id="connection-text">Waiting for an encounter</span></div>
         <button id="debug-button" class="text-button subtle">Decision log <kbd>F1</kbd></button>
@@ -87,6 +87,7 @@ FORM: User-pinned immersive isometric diorama, not a generated template or conce
       </div>
 
       <div id="scene-toast" class="scene-toast" role="status" hidden></div>
+      <button id="briefing-skip" class="briefing-skip" hidden>Handler speaking · Skip briefing</button>
       <div id="floor-arrival" class="floor-arrival" hidden><span id="arrival-number"></span><div><strong id="arrival-name"></strong><span id="arrival-subtitle"></span></div></div>
       <div id="gossip-feed" class="gossip-feed" aria-live="polite" aria-label="Things happening in the building"></div>
       <div id="nearby-actions" class="nearby-actions" hidden>
@@ -103,7 +104,7 @@ FORM: User-pinned immersive isometric diorama, not a generated template or conce
         <div class="speaker-portrait"><img id="speaker-portrait" alt="" hidden /><span id="speaker-initials" aria-hidden="true"></span></div>
         <div class="conversation-body">
           <div class="speaker-heading"><div><h2 id="speaker-name"></h2><span id="speaker-role"></span></div><div class="conversation-status"><span id="voice-indicator" aria-hidden="true"></span><span id="voice-status">Connecting…</span></div></div>
-          <p id="npc-caption" class="npc-caption" aria-live="polite" aria-atomic="true"></p>
+          <p id="npc-caption" class="npc-caption" aria-live="polite" aria-atomic="true" tabindex="0"></p>
           <p id="player-caption" class="player-caption"></p>
           <div id="suspicion-readout" class="suspicion-readout"><span>Character suspicion</span><meter id="suspicion-meter" min="0" max="100" value="0">0</meter><span id="suspicion-label">At ease</span></div>
           <form id="dialogue-form" class="dialogue-form"><label for="dialogue-input" class="sr-only">Your spoken or typed reply</label><input id="dialogue-input" name="reply" placeholder="Speak naturally, or type your reply…" maxlength="1600" autocomplete="off" /><button id="send-reply" type="submit" class="button button-jade">Send <span aria-hidden="true">↗</span></button></form>
@@ -117,7 +118,7 @@ FORM: User-pinned immersive isometric diorama, not a generated template or conce
       <aside id="debug-panel" class="debug-panel" aria-label="AI decision log" hidden><div><h2>Decision log</h2><button id="debug-close" class="close-button" aria-label="Close decision log">×</button></div><p>Paths: local A*. Decisions: source shown per request.</p><ol id="debug-entries"></ol></aside>
 
       <dialog id="elevator-dialog" class="paper-dialog elevator-dialog" aria-labelledby="elevator-title">
-        <div class="dialog-heading"><h2 id="elevator-title">Going up?</h2><button data-close="elevator-dialog" class="close-button" aria-label="Close floor selector">×</button></div><p class="dialog-intro">Meridian Tower · Passenger lift</p><div id="floor-list" class="floor-list"></div><p class="dialog-footnote">↑ ↓ to select · Enter to travel · Esc to stay</p>
+        <div class="dialog-heading"><h2 id="elevator-title">Going up?</h2><button data-close="elevator-dialog" class="close-button" aria-label="Close floor selector">×</button></div><p class="dialog-intro">Meridian Tower · Passenger lift</p><figure class="elevator-preview"><img id="elevator-preview-image" alt="" hidden /><figcaption id="elevator-preview-caption">Floor atmosphere preview</figcaption></figure><div id="floor-list" class="floor-list"></div><p class="dialog-footnote">↑ ↓ to select · Enter to travel · Esc to stay</p>
       </dialog>
 
       <dialog id="ledger-dialog" class="paper-dialog ledger-dialog" aria-labelledby="ledger-title">

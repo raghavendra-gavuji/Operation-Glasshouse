@@ -50,6 +50,8 @@ let ledgerTab = "claims";
 let activeModal: string | null = null;
 let providerConfigured: boolean | null = null;
 let providerHealthy = true;
+let directorReady = false;
+let narrationPending = false;
 let encounterVersion = 0;
 let pausedTransport = false;
 let lastFrame = performance.now();
@@ -79,7 +81,7 @@ const voice = new VoiceClient({
   },
   onTurnComplete() {
     finishTranscriptTurn();
-    if (pendingEnd) closeConversation();
+    if (pendingEnd || engine.state.phase === "ended") closeConversation();
     else updateVoiceStatus();
   },
   onLevel(level) {
@@ -115,11 +117,13 @@ const director = new DirectorLoop({
   onReply(reply, latency) {
     engine.applyDirector(reply);
     providerHealthy = true;
+    directorReady = true;
     debug(`Gemini director · ${latency} ms · floor ${engine.state.floor} · ${reply.intents.length} decisions`);
     updateConnection();
   },
   onError(message, retryIn) {
     providerHealthy = false;
+    directorReady = false;
     debug(`Gemini director · unavailable · retry in ${retryIn}s · ${message}`);
     showProviderError(`Gemini director unavailable: ${message} Retrying in ${retryIn}s. Local movement continues.`);
     updateConnection();
@@ -219,6 +223,7 @@ function bindInterface(): void {
   get("cancel-reset").addEventListener("click", () => show("reset-confirm", false));
   get("confirm-reset").addEventListener("click", () => eraseProgress());
   get("briefing-replay").addEventListener("click", () => { void playBriefing(); });
+  get("briefing-skip").addEventListener("click", () => { void playBriefing(); });
   get("leave-conversation").addEventListener("click", () => {
     if (busy) {
       textController?.abort();
@@ -277,11 +282,14 @@ function bindInterface(): void {
     }
     if (isTextTarget(event.target) || event.ctrlKey || event.metaKey || event.altKey || !started) return;
     if (activeModal === "elevator-dialog" && ["ArrowUp", "ArrowDown", "Enter"].includes(event.key)) {
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      if (event.key === "Enter" && target?.closest("[data-close]")) return;
       event.preventDefault();
-      if (event.key === "Enter") travelToFloor(selectedFloor);
+      if (event.key === "Enter") travelToFloor(target?.dataset.floor ? Number(target.dataset.floor) : selectedFloor);
       else {
         selectedFloor = Math.max(1, Math.min(12, selectedFloor + (event.key === "ArrowUp" ? 1 : -1)));
         renderElevator();
+        get("floor-list").querySelector<HTMLButtonElement>(`[data-floor="${selectedFloor}"]`)?.focus({ preventScroll: true });
       }
       return;
     }
@@ -292,7 +300,7 @@ function bindInterface(): void {
     } else if (event.key === "Escape") {
       event.preventDefault();
       pauseMission();
-    } else if (event.key === "Enter" && engine.canUseElevator && !conversationId) {
+    } else if (event.key === "Enter" && engine.canUseElevator && !conversationId && !(event.target instanceof HTMLElement && event.target.closest("button, a"))) {
       event.preventDefault();
       openElevator();
     }
@@ -405,6 +413,8 @@ async function startConversation(npcId: string): Promise<void> {
   busy = false;
   pendingEnd = false;
   narrationPlaying = false;
+  narrationPending = false;
+  show("briefing-skip", false);
   text("briefing-replay", "Listen to the briefing");
   conversationId = npcId;
   assembler.clear();
@@ -460,6 +470,7 @@ async function beginTextConversation(npc: NpcDefinition, version: number): Promi
   text("npc-caption", npc.greeting);
   renderer.setSpeech(npc.id, npc.greeting);
   recordTranscript("npc", npc.greeting);
+  narrationPending = true;
   updateVoiceStatus();
   engine.setConversationWaiting(true);
   try {
@@ -467,7 +478,10 @@ async function beginTextConversation(npc: NpcDefinition, version: number): Promi
   } catch (error) {
     if (version === encounterVersion) showProviderError(`Gemini speech unavailable: ${errorMessage(error)} Captions and typed dialogue remain available.`);
   } finally {
-    if (version === encounterVersion) updateVoiceStatus();
+    if (version === encounterVersion) {
+      narrationPending = false;
+      updateVoiceStatus();
+    }
   }
 }
 
@@ -518,7 +532,7 @@ async function sendReply(value: string): Promise<void> {
     } catch (error) {
       if (version === encounterVersion) showProviderError(`Gemini speech unavailable: ${errorMessage(error)} The reply is still shown in captions.`);
     }
-    if (pendingEnd && version === encounterVersion) closeConversation();
+    if ((pendingEnd || engine.state.phase === "ended") && version === encounterVersion) closeConversation();
   } catch (error) {
     if (version === encounterVersion && conversationId === npcId) {
       const message = error instanceof Error && error.name === "AbortError" ? "Gemini took too long to respond." : errorMessage(error);
@@ -609,6 +623,7 @@ function closeConversation(): void {
   conversationId = null;
   pendingEnd = false;
   busy = false;
+  narrationPending = false;
   assembler.clear();
   show("conversation", false);
   show("security-overlay", false);
@@ -630,6 +645,7 @@ function finishTranscriptTurn(): void {
 }
 
 function updateVoiceStatus(): void {
+  document.body.classList.toggle("text-mode", transport !== "live");
   let label = "Waiting for an encounter";
   if (conversationId) {
     if (pendingEnd) label = "Finishing conversation";
@@ -638,7 +654,7 @@ function updateVoiceStatus(): void {
     else label = ({ idle: "Text replies available", connecting: "Connecting to Gemini…", listening: microphoneMuted ? "Mic muted · type a reply" : "Listening to you", speaking: "Speaking", error: "Voice unavailable · type instead" })[voiceStatus];
   }
   text("voice-status", label);
-  const canAnswer = !!conversationId && !busy && !pendingEnd && !activeModal && (transport !== "live" || voiceStatus === "listening");
+  const canAnswer = !!conversationId && !busy && !narrationPending && !pendingEnd && !activeModal && (transport !== "live" || voiceStatus === "listening");
   engine.setConversationWaiting(!canAnswer);
   get<HTMLInputElement>("dialogue-input").disabled = !conversationId || busy || pendingEnd;
   get<HTMLButtonElement>("send-reply").disabled = !conversationId || busy || pendingEnd;
@@ -647,7 +663,7 @@ function updateVoiceStatus(): void {
 }
 
 function updateConnection(): void {
-  let label = engine.state.practiceMode ? "Practice · no AI" : !providerHealthy ? "Gemini director unavailable" : conversationId ? transport === "live" ? "Gemini Live voice" : "Gemini text conversation" : "Gemini director connected";
+  let label = engine.state.practiceMode ? "Practice · no AI" : !providerHealthy ? "Gemini director unavailable" : conversationId ? transport === "live" ? "Gemini Live voice" : "Gemini text mode" : directorReady ? "Gemini director connected" : "Gemini director connecting";
   if (!started) label = "Waiting for an encounter";
   text("connection-text", label);
   get("connection-readout").classList.toggle("error", !providerHealthy && !engine.state.practiceMode);
@@ -702,6 +718,7 @@ function switchToPractice(): void {
   encounterVersion += 1;
   textController?.abort();
   busy = false;
+  narrationPending = false;
   director.stop();
   show("provider-banner", false);
   if (conversationId) {
@@ -725,6 +742,7 @@ async function playBriefing(): Promise<void> {
     narrationPlaying = false;
     disconnectVoice();
     text("briefing-replay", "Listen to the briefing");
+    show("briefing-skip", false);
     return;
   }
   if (conversationId || engine.state.practiceMode) {
@@ -732,6 +750,7 @@ async function playBriefing(): Promise<void> {
     return;
   }
   narrationPlaying = true;
+  show("briefing-skip", true);
   text("briefing-replay", "Stop the briefing");
   text("handler-note", HANDLER_BRIEFING);
   try {
@@ -740,6 +759,7 @@ async function playBriefing(): Promise<void> {
     if (started && !conversationId && !activeModal && !(error instanceof Error && error.name === "AbortError")) showProviderError(`The Handler's spoken briefing is unavailable: ${errorMessage(error)} The written briefing remains in your dossier.`);
   } finally {
     narrationPlaying = false;
+    show("briefing-skip", false);
     text("briefing-replay", "Listen to the briefing");
   }
 }
@@ -759,12 +779,14 @@ function openModal(id: string): void {
     encounterVersion += 1;
     textController?.abort();
     busy = false;
+    narrationPending = false;
     disconnectVoice();
   }
   if (narrationPlaying) {
     disconnectVoice();
     narrationPlaying = false;
     text("briefing-replay", "Listen to the briefing");
+    show("briefing-skip", false);
   }
   syncPause();
   get<HTMLDialogElement>(id).showModal();
@@ -806,11 +828,13 @@ function openElevator(): void {
   renderElevator();
   void art.prefetchFloors([selectedFloor - 1, selectedFloor + 1]);
   openModal("elevator-dialog");
+  get("floor-list").querySelector<HTMLButtonElement>(`[data-floor="${selectedFloor}"]`)?.focus({ preventScroll: true });
 }
 
 function renderElevator(): void {
   const container = get("floor-list");
   container.replaceChildren();
+  previewFloor(selectedFloor);
   for (const floor of [...engine.floors].reverse()) {
     const button = document.createElement("button");
     button.type = "button";
@@ -822,9 +846,18 @@ function renderElevator(): void {
     button.setAttribute("aria-pressed", String(floor.id === selectedFloor));
     button.innerHTML = `<span>${String(floor.id).padStart(2, "0")}</span><div><strong>${escapeHtml(floor.name)}</strong><small>${floor.id === engine.state.floor ? "You are here" : escapeHtml(floor.subtitle)}</small></div>`;
     button.addEventListener("click", () => travelToFloor(floor.id));
-    button.addEventListener("pointerenter", () => { void art.prefetchFloors([floor.id]); });
+    button.addEventListener("pointerenter", () => {
+      void art.prefetchFloors([floor.id]);
+      previewFloor(floor.id);
+    });
     container.append(button);
   }
+}
+
+function previewFloor(id: number): void {
+  setImage("elevator-preview-image", `floor-${id}`);
+  const floor = engine.floors.find((item) => item.id === id);
+  if (floor) text("elevator-preview-caption", `${String(id).padStart(2, "0")} · ${floor.name}. Atmosphere preview, not a navigation map.`);
 }
 
 function travelToFloor(floor: number): void {
@@ -877,7 +910,8 @@ function showReport(ending: Ending): void {
   const witnesses = new Set(state.ledger.map((claim) => claim.npcId)).size;
   get("report-summary").innerHTML = `<p><strong>${escapeHtml(state.cover.name || "No cover identity")}</strong>${state.cover.company ? ` · ${escapeHtml(state.cover.company)}` : ""}</p><p>Departed at <strong>${clockLabel(state.clockMinute)}</strong> · ${witnesses} ${witnesses === 1 ? "witness" : "witnesses"} to your claims · ${state.ledger.filter((claim) => claim.contradiction).length} story changes</p><p>${state.visitorLog ? `Logged as <strong>${escapeHtml(state.visitorLog)}</strong>` : "Not registered"}${state.authorization ? ` · Authorized by <strong>${escapeHtml(engine.definitions.find((npc) => npc.id === state.authorization?.by)?.name ?? state.authorization.by)}</strong>` : " · No authorization"} · ${state.player.carryingCard ? "Keycard collected" : "No keycard"}</p>`;
   clearTimeout(closeTimer);
-  closeTimer = setTimeout(() => disconnectVoice(), transport === "live" ? 12_000 : 1000);
+  if (conversationId) closeTimer = setTimeout(closeConversation, transport === "live" ? 20_000 : 45_000);
+  else disconnectVoice();
 }
 
 function updateHud(): void {
@@ -929,6 +963,7 @@ function updateArt(): void {
   setImage("cover-portrait", "portrait-ghost");
   if (conversationId) setImage("speaker-portrait", `portrait-${conversationId}`);
   if (engine.state.ending) setImage("report-portrait", engine.state.ending === "double-cross" ? "portrait-meera" : "portrait-ghost");
+  if (activeModal === "elevator-dialog") previewFloor(selectedFloor);
   text("art-status", art.status === "ready" ? "" : "Generated artwork is still arriving. Intentional pixel placeholders are shown where needed.");
 }
 
@@ -1024,8 +1059,9 @@ function readSave(): void {
 function saveMission(): void {
   if (!started || storageFailed) return;
   try {
-    savedMission = engine.serialize();
-    localStorage.setItem(SAVE_KEY, savedMission);
+    const serialized = engine.serialize();
+    localStorage.setItem(SAVE_KEY, serialized);
+    savedMission = serialized;
   } catch (error) {
     storageFailed = true;
     announce(`Progress could not be saved on this device: ${errorMessage(error)}`);
@@ -1073,6 +1109,7 @@ function eraseProgress(): void {
     announce(`Saved progress could not be erased: ${errorMessage(error)}`);
     return;
   }
+  started = false;
   resetEngine();
   savedMission = null;
   storageFailed = false;

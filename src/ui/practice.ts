@@ -63,7 +63,7 @@ export function practiceOptions(state: GameState, npc: NpcDefinition): PracticeO
       { id: "access_rules", label: "Ask how visitor access works", text: "How does visitor access work here?", reply: "Priya writes the name. Dev signs the authorization with a Meridian ticket, or Anita can sign if the CFO is away. Ramesh, second floor, won't release a card unless both names match." },
       { id: "cfo_away", label: "Ask about the CFO", text: "Is the CFO in today?", reply: "Away from the tower. Anita is holding the executive desk on eleven. She can sign an authorization when the CFO isn't around." },
       { id: "server_room", label: "Ask about the blue door", text: "What is behind the blue door on seven?", reply: "The server room. People are much too interested in that door lately. Look at the place carefully, but don't barge into restricted areas." },
-      { id: "handler_secret", label: "Ask what the Handler is hiding", text: "I think my Handler is using me. What do you know?", reply: "Your Handler isn't sending you in for an innocent visit. Take what you've learned to Meera. At the entrance, you can call her instead of completing the job." },
+      { id: "handler_secret", label: "Ask what the Handler is hiding", text: "I think my Handler is using me. What do you know?", reply: "I remember another supposed auditor. Same instructions, same contact description. He met a representative of Ashoka Capital. Your Handler has another client. At the entrance, call Meera instead of delivering that keycard." },
     ];
     for (const discovery of discoveries) {
       if (!state.facts.some((fact) => fact.id === discovery.id)) {
@@ -86,7 +86,7 @@ export function practiceOptions(state: GameState, npc: NpcDefinition): PracticeO
     if (state.secretKnown) {
       options.push({
         id: "security-secret", label: "Tell Meera about the Handler",
-        text: "I have evidence that the Handler is using this visit to reach the server room.",
+        text: "Mr. Kulkarni recalls someone with my Handler's instructions meeting a representative of Ashoka Capital.",
         reply: "That changes the conversation. I will handle the Handler.",
         actions: [{ type: "security_resolution", npcId: id, result: "double_cross", reason: "The visitor discloses the discovered Handler evidence." }],
       });

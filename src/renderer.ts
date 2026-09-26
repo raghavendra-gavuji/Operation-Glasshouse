@@ -451,7 +451,7 @@ export class OfficeRenderer {
       lines.forEach((line, index) => ctx.fillText(line, left + 7, top + 10 + index * 8));
     }
     if (addressed || distance < 5 || npc.suspicion >= 45) {
-      const text = definition?.name.split(" ")[0] ?? "Staff";
+      const text = npc.id === "kulkarni" ? "Kulkarni" : definition?.name.split(" ")[0] ?? "Staff";
       ctx.font = `${addressed ? "bold " : ""}6px 'Segoe UI', sans-serif`;
       ctx.textAlign = "center";
       const width = ctx.measureText(text).width + 9;
