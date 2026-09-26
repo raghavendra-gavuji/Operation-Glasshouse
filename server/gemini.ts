@@ -6,12 +6,14 @@ import {
 import { z } from "zod/v4";
 import type { ConversationContext, DialogueReply, DirectorContext, DirectorReply } from "../shared/types";
 import { limits, type ServerConfig } from "./config";
+import { buildDirectorPlan } from "./director";
 import { invalidResponse, providerError, ServiceError } from "./errors";
 import {
-  actionIsAllowed, conversationInstruction, directorInstruction, directorSnapshot,
+  actionIsAllowed, conversationInstruction, directorInstruction,
 } from "./prompts";
-import { dialogueReplySchema, directorReplySchema, generationJsonSchema } from "./schemas";
+import { dialogueReplySchema, generationJsonSchema } from "./schemas";
 import { generatedAudioToWav } from "./wav";
+export { validateDirectorReply } from "./director";
 
 export type LiveSession = Pick<Session, "sendClientContent" | "sendRealtimeInput" | "sendToolResponse" | "close">;
 export interface GeminiTransport {
@@ -66,21 +68,6 @@ export function parseStructuredResponse<T>(response: unknown, schema: z.ZodType<
   return parsed.data;
 }
 
-export function validateDirectorReply(reply: DirectorReply, context: DirectorContext): DirectorReply {
-  const ids = new Set(context.npcs.map(npc => npc.definition.id));
-  const seen = new Set<string>();
-  for (const intent of reply.intents) {
-    if (!ids.has(intent.npcId) || seen.has(intent.npcId)) throw invalidResponse();
-    seen.add(intent.npcId);
-    if (intent.target && (intent.target.x >= context.floor.width || intent.target.y >= context.floor.height)) throw invalidResponse();
-    if (intent.targetNpcId && (!ids.has(intent.targetNpcId) || intent.targetNpcId === intent.npcId)) throw invalidResponse();
-    if (intent.action === "chat_with" && !intent.targetNpcId) throw invalidResponse();
-    if (["walk_to", "emerge_from", "investigate", "block_path"].includes(intent.action) && !intent.target) throw invalidResponse();
-  }
-  if (reply.chatter.some(item => !ids.has(item.from) || !ids.has(item.to) || item.from === item.to)) throw invalidResponse();
-  return reply;
-}
-
 export function createGeminiService(config: ServerConfig, injected?: GeminiTransport): GeminiService {
   let transport = injected;
   const audioCache = new Map<string, { audio: Buffer; expires: number }>();
@@ -125,8 +112,9 @@ export function createGeminiService(config: ServerConfig, injected?: GeminiTrans
 
   return {
     async director(context, signal) {
-      const reply = await structured(directorInstruction, JSON.stringify(directorSnapshot(context)), directorReplySchema, signal);
-      return validateDirectorReply(reply, context);
+      const plan = buildDirectorPlan(context);
+      const reply = await structured(directorInstruction, JSON.stringify(plan.snapshot), plan.schema, signal);
+      return plan.complete(reply);
     },
     async dialogue(context, text, signal) {
       const reply = await structured(conversationInstruction(context, false), JSON.stringify({ visitorSaid: text }), dialogueReplySchema, signal);

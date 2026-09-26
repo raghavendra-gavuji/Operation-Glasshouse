@@ -23,6 +23,8 @@ Errors have `{error:{code,message,retryable}}`, an appropriate non-2xx status, a
 
 Flash uses `LOW` thinking and a compact structural `responseJsonSchema`. The complete bounded Zod schema produces a nested response grammar rejected by the current model with HTTP 400 `INVALID_ARGUMENT`. Types, properties, required fields, enums and unions remain in the provider schema; **all length, count, range and role-capability checks still run server-side after generation**. Both `schemaOutput` and ordinary JSON text responses are parsed. Malformed or truncated results are rejected, not repaired into a success.
 
+Director requests accept the optional `activeNpcId` field populated by the engine. The planner receives exact enum actor IDs, reachable named destinations calculated with the engine's existing navigation helpers, and already-near line-of-sight chatter pairs. Its selected destination/pair IDs are resolved to the public `DirectorReply` coordinates and speakers, then checked again before delivery. Display names are never accepted as IDs, and engaged actors are unavailable. The client must discard responses whose floor or active encounter changed while the request was in flight.
+
 TTS input is the verbatim narration text, not a prompt containing stage instructions. WAV output is validated; raw PCM output is wrapped in one WAV header. The cache is memory-only, limited to 24 entries / 16 MiB, with a ten-minute expiry.
 
 ## Live protocol and authority
@@ -33,7 +35,11 @@ Input audio is mono, 16 kHz, signed little-endian PCM. Output is 24 kHz PCM. Cam
 
 `apply_game_action` emits an `action` with an opaque `requestId`. The browser must apply the action through the game engine and return `tool_result`. Only then does the proxy send Gemini the engine's accepted/rejected result using the original provider function-call ID. Missing confirmations are rejected after ten seconds; cancelled or late confirmations never become approvals.
 
+The identity-specific `record_identity_claims` tool requires all seven identity fields (empty strings for unstated fields) plus the visitor's actual quote. Each new nonempty field emits a separate existing `GameAction` claim and `requestId`; the original function response waits for **every** engine acknowledgement and includes per-field results. No group result authorizes registration, and a partial timeout cannot become blanket approval. Both tools use the same unchanged browser action/result protocol.
+
 Priya registers; Dev or Anita authorizes; Ramesh issues the card. Kulkarni can only disclose available facts. Meera's proposed resolution is checked by the engine; the double-cross exit call is not a voice-tool shortcut. Positive suspicion requires game evidence. Private knowledge and delivered hearsay never become omniscient player-state access. Voice, camera, accent, pauses and missing devices are not evidence of deception or identity.
+
+Normal spoken introductions are a mandatory claim-first workflow: record all explicit identity fields with `record_identity_claims`, wait for engine acknowledgements, propose the appropriate mission gate with `apply_game_action`, and only then ask for genuinely missing information or confirm the accepted outcome. Visitors never need to mention a tool name. Priya cannot add ticket, identification, callback, document or off-screen host-confirmation requirements to registration. Spoken punctuation in fictional `MT-...` / `SIM-####` props may be normalized without changing the quoted evidence.
 
 ## `VoiceClient` integration
 
@@ -55,7 +61,7 @@ Offline regression tests:
 
 ```powershell
 npm.cmd run typecheck
-npm.cmd test -- tests\server.test.ts tests\server-web.test.ts tests\audio.test.ts tests\audio-worklet.test.ts
+npm.cmd test -- tests\server.test.ts tests\server-director.test.ts tests\server-web.test.ts tests\audio.test.ts tests\audio-worklet.test.ts
 ```
 
 The real smoke tests are **opt-in and incur provider usage**. They exercise Flash director/dialogue, two TTS voices and caching, and Live audio/transcription plus an engine-rejected tool call. They keep generated audio in memory and never print credentials.
@@ -65,3 +71,12 @@ $env:GLASSHOUSE_ENV_FILE = 'C:\private\glasshouse.env'
 $env:GLASSHOUSE_REAL_API_SMOKE = '1'
 npm.cmd test -- tests\server-smoke.test.ts
 ```
+
+Full gameplay acceptance is separately opt-in. It checks repeated real six-actor and engaged-five-actor director ticks against the actual engine, then streams synthetic spoken PCM through the production worklet and Live proxy until the engine accepts identity claims and registration. Unlike the small smoke check, the visitor does not instruct Gemini to invoke a tool. These checks require the shared engine implementation.
+
+```powershell
+$env:GLASSHOUSE_REAL_ACCEPTANCE = '1'
+npm.cmd test -- tests\server-acceptance.test.ts
+```
+
+By default the speech is generated in memory with the configured TTS model. To reuse an explicitly supplied **synthetic, mono 24 kHz PCM WAV** fixture, set `GLASSHOUSE_ACCEPTANCE_WAV` to its path. No real microphone is accessed by these tests.

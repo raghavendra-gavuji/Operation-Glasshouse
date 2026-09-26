@@ -185,6 +185,15 @@ describe("Gemini response contracts and NPC authority", () => {
     expect(actionIsAllowed({ type: "claim", npcId: "priya", field: "callback", value: "5551234", quote: "5551234" }, context())).toBe(false);
   });
 
+  it("requires normal speech to record claims before questions without extra registration demands", () => {
+    const instruction = conversationInstruction(context(), true);
+    expect(instruction).toContain("Ordinary visitor identity statements MUST trigger record_identity_claims");
+    expect(instruction).toContain("not just the minimum gate requirements");
+    expect(instruction).toContain("Do not require a ticket, ID, callback or authorizer for registration");
+    expect(instruction).toContain("Never demand identification, documents, photos");
+    expect(instruction).toContain("MT-ID-1042");
+  });
+
   it("parses schemaOutput or JSON parts, but rejects malformed/truncated output", () => {
     expect(parseStructuredResponse({ schemaOutput: directorReply }, directorReplySchema)).toEqual(directorReply);
     expect(parseStructuredResponse(response(directorReply), directorReplySchema)).toEqual(directorReply);
@@ -358,6 +367,85 @@ describe("Live bridge lifecycle and tool acknowledgements", () => {
     await vi.advanceTimersByTimeAsync(31);
     expect(stub.session.sendToolResponse).toHaveBeenCalledTimes(1);
     expect(emitted.some(message => message.type === "interrupted")).toBe(true);
+  });
+
+  it("splits a complete spoken identity into individual claims and waits for every engine result", async () => {
+    const { stub, emitted, bridge } = await setup();
+    stub.parameters.callbacks.onmessage(modelMessage({ toolCall: { functionCalls: [{
+      id: "identity-1", name: "record_identity_claims",
+      args: {
+        name: "Nila", company: "Acme", role: "contractor", host: "Dev", ticket: "", callback: "", employeeId: "",
+        quote: "I'm Nila, a contractor from Acme visiting Dev.",
+      },
+    }] } }));
+    const actions = emitted.filter(message => message.type === "action");
+    expect(actions).toHaveLength(4);
+    expect(actions.some(message => message.action.type === "claim" && message.action.field === "role")).toBe(true);
+    expect(stub.session.sendToolResponse).not.toHaveBeenCalled();
+    actions.slice(0, 3).forEach(message => bridge.receive({
+      type: "tool_result", requestId: message.requestId, result: { accepted: true, message: "Claim recorded." },
+    }));
+    expect(stub.session.sendToolResponse).not.toHaveBeenCalled();
+    bridge.receive({ type: "tool_result", requestId: actions[3].requestId, result: { accepted: false, message: "The engine rejected this field." } });
+    expect(stub.session.sendToolResponse).toHaveBeenCalledOnce();
+    expect(stub.session.sendToolResponse.mock.calls[0][0]).toMatchObject({
+      functionResponses: [{
+        id: "identity-1", name: "record_identity_claims", response: {
+          accepted: false, results: [
+            { accepted: true }, { accepted: true }, { accepted: true }, { accepted: false },
+          ],
+        },
+      }],
+    });
+  });
+
+  it("cancels every pending member of an identity tool without later acknowledging them", async () => {
+    const { stub, emitted, bridge } = await setup("priya", { toolTimeoutMs: 20 });
+    stub.parameters.callbacks.onmessage(modelMessage({ toolCall: { functionCalls: [{
+      id: "identity-cancel", name: "record_identity_claims",
+      args: { name: "Nila", company: "Acme", role: "contractor", host: "", callback: "", ticket: "", employeeId: "", quote: "Nila, contractor from Acme." },
+    }] } }));
+    const actions = emitted.filter(message => message.type === "action");
+    expect(actions).toHaveLength(3);
+    stub.parameters.callbacks.onmessage(modelMessage({ toolCallCancellation: { ids: ["identity-cancel"] } }));
+    await vi.advanceTimersByTimeAsync(21);
+    bridge.receive({ type: "tool_result", requestId: actions[0].requestId, result: { accepted: true, message: "Late result." } });
+    expect(stub.session.sendToolResponse).not.toHaveBeenCalled();
+  });
+
+  it("returns partial identity acceptance only after unconfirmed members time out", async () => {
+    const { stub, emitted, bridge } = await setup("priya", { toolTimeoutMs: 20 });
+    stub.parameters.callbacks.onmessage(modelMessage({ toolCall: { functionCalls: [{
+      id: "identity-partial", name: "record_identity_claims",
+      args: { name: "Nila", company: "Acme", role: "", host: "", callback: "", ticket: "", employeeId: "", quote: "I'm Nila from Acme." },
+    }] } }));
+    const actions = emitted.filter(message => message.type === "action");
+    bridge.receive({ type: "tool_result", requestId: actions[0].requestId, result: { accepted: true, message: "Name recorded." } });
+    expect(stub.session.sendToolResponse).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(21);
+    expect(stub.session.sendToolResponse).toHaveBeenCalledOnce();
+    expect(stub.session.sendToolResponse.mock.calls[0][0]).toMatchObject({
+      functionResponses: [{ id: "identity-partial", response: { accepted: false, results: [{ field: "name", accepted: true }, { field: "company", accepted: false }] } }],
+    });
+  });
+
+  it("rejects missing identity fields explicitly instead of guessing empty values", async () => {
+    const { stub, emitted } = await setup();
+    stub.parameters.callbacks.onmessage(modelMessage({ toolCall: { functionCalls: [{
+      id: "identity-malformed", name: "record_identity_claims", args: { name: "Nila", quote: "I'm Nila." },
+    }] } }));
+    expect(emitted.some(message => message.type === "action")).toBe(false);
+    expect(stub.session.sendToolResponse.mock.calls[0][0]).toMatchObject({ functionResponses: [{ response: { accepted: false } }] });
+  });
+
+  it("processes a function call in model parts once even if also present in toolCall", async () => {
+    const { stub, emitted } = await setup();
+    const call = { id: "mirrored-call", name: "apply_game_action", args: { type: "claim", field: "name", value: "Nila", quote: "Nila" } };
+    stub.parameters.callbacks.onmessage(modelMessage({
+      serverContent: { modelTurn: { parts: [{ functionCall: call }] } },
+      toolCall: { functionCalls: [call] },
+    }));
+    expect(emitted.filter(message => message.type === "action")).toHaveLength(1);
   });
 
   it("closes a late connect result after disconnect without starting an encounter", async () => {

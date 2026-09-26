@@ -65,6 +65,7 @@ const floorPlan = z.strictObject({
 }).refine(value => value.tiles.length === value.width * value.height, { message: "Floor tile dimensions do not match." });
 
 export const directorContextSchema = z.strictObject({
+  activeNpcId: id.nullable().optional(),
   floor: floorPlan,
   player: point.extend({ facing: direction, moving: z.boolean(), carryingCard: z.boolean() }),
   npcs: z.array(z.strictObject({ definition: npc, state: npcState })).max(64),
@@ -96,6 +97,17 @@ export const actionArgumentsSchema = z.strictObject({
   name: shortText.optional(), factId: id.optional(), summary: text.optional(),
   result: z.enum(["warning", "burned", "double_cross"]).optional(),
 });
+const statedIdentity = z.string().max(120);
+export const identityClaimsSchema = z.strictObject({
+  name: statedIdentity.describe("The visitor's explicitly stated invented name; empty if not stated."),
+  company: statedIdentity.describe("The visitor's explicitly stated company; empty if not stated."),
+  role: statedIdentity.describe("The explicitly stated job or work role, e.g. contractor. Capture it even when company and host are also stated. Empty only if not stated."),
+  host: statedIdentity.describe("The person or office the visitor explicitly says they are visiting; empty if not stated."),
+  callback: z.union([z.literal(""), z.string().regex(/^SIM-\d{4}$/)]).describe("An explicitly stated fictional SIM-#### callback, with spoken punctuation normalized, or empty. Never include a real phone number."),
+  employeeId: statedIdentity.describe("An explicitly stated fictional employee prop; empty if not stated."),
+  ticket: statedIdentity.describe("An explicitly stated fictional MT-... ticket, with spoken punctuation normalized; empty if not stated."),
+  quote: z.string().trim().min(1).max(1000).describe("The actual visitor utterance supporting these fields. No invented dialogue or example text."),
+});
 export const actionResultSchema = z.strictObject({
   accepted: z.boolean(), message: z.string().min(1).max(2000),
 }) satisfies z.ZodType<ActionResult>;
@@ -104,7 +116,7 @@ export const directorReplySchema = z.strictObject({
   intents: z.array(z.strictObject({
     npcId: id, action: intentKind, target: point.optional(), targetNpcId: id.optional(),
     reason: z.string().min(1).max(300), say: z.string().max(180).optional(),
-  })).max(64),
+  })).max(40),
   chatter: z.array(z.strictObject({ from: id, to: id, text: z.string().min(1).max(220) })).max(3),
   source: z.literal("gemini"),
 }) satisfies z.ZodType<DirectorReply>;

@@ -1,21 +1,26 @@
 import { randomUUID } from "node:crypto";
 import { ActivityHandling, Modality, type FunctionCall, type LiveServerMessage, type Transcription } from "@google/genai";
-import type { ActionResult, ConversationContext, ServerLiveMessage } from "../shared/types";
+import type { ActionResult, ConversationContext, GameAction, ServerLiveMessage } from "../shared/types";
 import { TokenBucket } from "./bounds";
 import { limits } from "./config";
 import { invalidResponse, providerError, safeLog, ServiceError } from "./errors";
 import type { GeminiService, LiveSession } from "./gemini";
 import {
-  actionIsAllowed, canonicalNpc, conversationInstruction, conversationSnapshot, gameActionTool,
+  actionIsAllowed, canonicalNpc, conversationInstruction, conversationSnapshot, gameActionTool, identityClaimsTool,
 } from "./prompts";
-import { actionArgumentsSchema, clientLiveMessageSchema, gameActionSchema, parseInput } from "./schemas";
+import { actionArgumentsSchema, clientLiveMessageSchema, coverFieldSchema, gameActionSchema, identityClaimsSchema, parseInput } from "./schemas";
 
 type Emit = (message: ServerLiveMessage) => void;
 interface PendingTool {
   id: string;
   name: string;
+  action: GameAction;
+  group?: ToolGroup;
   timer: ReturnType<typeof setTimeout>;
 }
+interface ClaimResult extends ActionResult { field: string }
+interface ToolResult extends ActionResult { results?: ClaimResult[] }
+interface ToolGroup { remaining: number; results: ClaimResult[] }
 export interface LiveBridgeOptions {
   setupTimeoutMs?: number;
   encounterMs?: number;
@@ -57,7 +62,7 @@ export class LiveBridge {
   private readonly queuedProviderEvents: LiveServerMessage[] = [];
   private readonly pending = new Map<string, PendingTool>();
   private readonly seenCalls = new Set<string>();
-  private readonly completedCalls = new Map<string, ActionResult>();
+  private readonly completedCalls = new Map<string, ToolResult>();
   private readonly cancelledCalls = new Set<string>();
   private readonly inputTranscript: TranscriptBuffer;
   private readonly outputTranscript: TranscriptBuffer;
@@ -203,7 +208,7 @@ export class LiveBridge {
         outputAudioTranscription: {},
         speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: npc.voiceName } } },
         systemInstruction: conversationInstruction(context, true),
-        tools: [{ functionDeclarations: [gameActionTool(context)] }],
+        tools: [{ functionDeclarations: [identityClaimsTool(), gameActionTool(context)] }],
         maxOutputTokens: 2048,
         realtimeInputConfig: {
           activityHandling: ActivityHandling.START_OF_ACTIVITY_INTERRUPTS,
@@ -298,6 +303,7 @@ export class LiveBridge {
       }
       for (const part of content?.modelTurn?.parts ?? []) {
         if (part.thought) continue;
+        if (part.functionCall) this.functionCall(part.functionCall);
         if (part.text) {
           this.outputTextFallback += part.text;
           if (this.outputTextFallback.length > limits.maxTranscriptChars) throw invalidResponse();
@@ -343,6 +349,7 @@ export class LiveBridge {
 
   private functionCall(call: FunctionCall): void {
     if (!this.session || !this.context) throw invalidResponse();
+    const context = this.context;
     if (!call.id || call.id.length > 128 || !call.name || call.name.length > 96) throw invalidResponse();
     if (this.cancelledCalls.has(call.id)) return;
     const completed = this.completedCalls.get(call.id);
@@ -353,33 +360,50 @@ export class LiveBridge {
     if (this.seenCalls.has(call.id)) return;
     this.seenCalls.add(call.id);
     if (this.seenCalls.size > 96) throw new ServiceError(429, "LIVE_TOOL_LIMIT", "This encounter requested too many game actions. Continue with text or a new encounter.");
-    const args = actionArgumentsSchema.safeParse(call.args);
-    const parsed = args.success ? gameActionSchema.safeParse({ ...args.data, npcId: this.context.npc.id }) : undefined;
-    if (call.name !== "apply_game_action" || !parsed?.success || !actionIsAllowed(parsed.data, this.context)) {
-      const result = { accepted: false, message: "The proposed action is invalid, unavailable to this NPC, or unsupported by the supplied game evidence. No action was sent to the game engine." };
+    let actions: GameAction[] = [];
+    if (call.name === "record_identity_claims") {
+      const identity = identityClaimsSchema.safeParse(call.args);
+      if (identity.success) {
+        for (const field of coverFieldSchema.options) {
+          const value = identity.data[field].trim();
+          if (!value || context.claims.some(claim => claim.npcId === context.npc.id && claim.field === field
+            && claim.value.trim().replace(/\s+/g, " ").toLowerCase() === value.replace(/\s+/g, " ").toLowerCase())) continue;
+          actions.push({ type: "claim", npcId: context.npc.id, field, value, quote: identity.data.quote });
+        }
+      }
+    } else if (call.name === "apply_game_action") {
+      const args = actionArgumentsSchema.safeParse(call.args);
+      const parsed = args.success ? gameActionSchema.safeParse({ ...args.data, npcId: context.npc.id }) : undefined;
+      if (parsed?.success) actions = [parsed.data];
+    }
+    if (!actions.length || actions.some(action => !actionIsAllowed(action, context))) {
+      const result = { accepted: false, message: "The proposal is invalid, has no new stated claims, or is unavailable to this NPC. For record_identity_claims supply all seven identity fields (empty only when unstated) plus the actual quote. No action was sent to the game engine." };
       this.completedCalls.set(call.id, result);
       this.sendToolResponse(call.id, call.name, result);
       return;
     }
-    if (this.pending.size >= limits.maxPendingTools) {
+    if (this.pending.size + actions.length > limits.maxPendingTools) {
       this.sendToolResponse(call.id, call.name, { accepted: false, message: "Too many actions are awaiting game-engine confirmation. Wait for those results." });
       return;
     }
+    const group: ToolGroup | undefined = call.name === "record_identity_claims" ? { remaining: actions.length, results: [] } : undefined;
+    for (const action of actions) this.proposeAction(call.id, call.name, action, group);
+  }
+
+  private proposeAction(id: string, name: string, action: GameAction, group?: ToolGroup): void {
     const requestId = randomUUID();
     const pending: PendingTool = {
-      id: call.id,
-      name: call.name,
+      id, name, action, group,
       timer: setTimeout(() => {
         if (this.ended || !this.pending.delete(requestId)) return;
         const result = { accepted: false, message: "The game engine did not confirm this action in time. It was not approved." };
-        this.completedCalls.set(pending.id, result);
-        try { this.sendToolResponse(pending.id, pending.name, result); }
+        try { this.completeAction(pending, result); }
         catch (error) { this.fail(providerError(error)); }
         if (!this.ended) this.emit({ type: "error", message: "A game action timed out waiting for the engine. It was not approved.", recoverable: true });
       }, this.options.toolTimeoutMs ?? limits.toolTimeoutMs),
     };
     this.pending.set(requestId, pending);
-    this.emit({ type: "action", requestId, action: parsed.data });
+    this.emit({ type: "action", requestId, action });
   }
 
   private toolResult(requestId: string, result: ActionResult): void {
@@ -390,12 +414,34 @@ export class LiveBridge {
     }
     clearTimeout(pending.timer);
     this.pending.delete(requestId);
-    this.completedCalls.set(pending.id, result);
-    this.sendToolResponse(pending.id, pending.name, result);
+    this.completeAction(pending, result);
   }
 
-  private sendToolResponse(id: string, name: string, result: ActionResult): void {
+  private completeAction(pending: PendingTool, result: ActionResult): void {
+    let response: ToolResult = result;
+    if (pending.group) {
+      pending.group.results.push({ ...result, field: pending.action.type === "claim" ? pending.action.field : pending.action.type });
+      pending.group.remaining--;
+      if (pending.group.remaining > 0) return;
+      const accepted = pending.group.results.every(result => result.accepted);
+      response = {
+        accepted,
+        message: accepted ? "All proposed identity claims were accepted by the game engine. Now check your role's mission gate; identity recording alone does not register or authorize a visitor."
+          : "Some identity claims were not accepted. Preserve accepted fields and respect every individual engine result before proposing a mission gate.",
+        results: pending.group.results,
+      };
+    }
+    this.completedCalls.set(pending.id, response);
+    this.sendToolResponse(pending.id, pending.name, response);
+  }
+
+  private sendToolResponse(id: string, name: string, result: ToolResult): void {
     if (!this.session || this.ended) return;
-    this.session.sendToolResponse({ functionResponses: [{ id, name, response: { accepted: result.accepted, message: result.message } }] });
+    this.session.sendToolResponse({ functionResponses: [{
+      id, name, response: {
+        accepted: result.accepted, message: result.message,
+        ...(result.results ? { results: result.results } : {}),
+      },
+    }] });
   }
 }
