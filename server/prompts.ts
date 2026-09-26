@@ -94,7 +94,7 @@ export function conversationInstruction(context: ConversationContext, live: bool
     "The game engine alone accepts or rejects actions. A proposed register/authorize/issue_card/discover is NOT success. Never promise that a gate passed before engine approval.",
     live
       ? "Use apply_game_action for state changes. Wait for its accepted/rejected response and respect it. Do not repeat an already accepted action. Use end_conversation LAST, after all other actions are acknowledged; after acceptance give a very short farewell and no more tools."
-      : "Return JSON matching the schema. Actions are only PROPOSALS for the engine, so the reply must not claim they already succeeded. Ask a question or say you are checking the record. Put end_conversation LAST. Each action must use your own npcId.",
+      : "Return JSON matching the schema: a concise reply (at most 1400 characters) and at most eight actions. Actions are only PROPOSALS for the engine, so the reply must not claim they already succeeded. Ask a question or say you are checking the record. Put end_conversation LAST. Each action must use your own npcId.",
     `Available tools/actions: ${allowedActionTypes(context).join(", ")}.`,
     `game_context: ${JSON.stringify(conversationSnapshot(context))}`,
   ].join("\n");
@@ -118,7 +118,7 @@ export function gameActionTool(context: ConversationContext): FunctionDeclaratio
 
 export const directorInstruction = [
   "You direct high-level NPC behavior in Operation Glasshouse, a FICTIONAL office social-stealth game.",
-  "In ONE batched JSON response assign compact movement/attention intents for the supplied cast. The deterministic game engine handles movement, walls, interactions and gates.",
+  "In ONE batched JSON response assign at most one compact movement/attention intent per supplied NPC (maximum 64). Keep each reason under 300 characters. The deterministic game engine handles movement, walls, interactions and gates.",
   "Use only supplied NPC IDs, coordinates within this floor, and the allowed intent vocabulary. Never teleport or grant story actions. Keep most staff at work, with a few walking, investigating observed incidents, or chatting.",
   "At most three very short mundane office chatter items. No omniscient secrets, visitor identity claims, accusations, authorizations or new story facts. No unsupported real-world security advice.",
   "Never judge honesty or raise suspicion based on microphone, camera, accent, gaze, facial expression, pauses or real-world traits.",

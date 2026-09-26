@@ -12,7 +12,7 @@ import { createGeminiService, parseStructuredResponse, type GeminiService, type 
 import { createGlasshouseServer, localRequestAllowed, type AssetService, type GlasshouseServer } from "../server/index";
 import { LiveBridge } from "../server/live";
 import { actionIsAllowed, allowedActionTypes, conversationInstruction, conversationSnapshot } from "../server/prompts";
-import { clientLiveMessageSchema, conversationContextSchema, directorReplySchema } from "../server/schemas";
+import { clientLiveMessageSchema, conversationContextSchema, directorReplySchema, generationJsonSchema } from "../server/schemas";
 import { generatedAudioToWav, pcmToWav, wavToPcm } from "../server/wav";
 
 function context(npcId = "priya"): ConversationContext {
@@ -195,6 +195,15 @@ describe("Gemini response contracts and NPC authority", () => {
     expect(() => parseStructuredResponse({ candidates: [{ content: { parts: [{ text: "```json\n{}\n```" }] } }] }, directorReplySchema)).toThrow("invalid");
   });
 
+  it("uses a compact provider grammar while retaining full post-generation bounds", () => {
+    const schema = generationJsonSchema(directorReplySchema);
+    expect(schema).toMatchObject({ properties: { source: { type: "string", enum: ["gemini"] }, intents: { type: "array" } } });
+    expect(JSON.stringify(schema)).not.toMatch(/"(maxItems|minLength|maxLength|minimum|maximum|pattern|const)":/);
+    expect(() => parseStructuredResponse(response({
+      ...directorReply, intents: [{ npcId: "priya", action: "idle", reason: "x".repeat(301) }],
+    }), directorReplySchema)).toThrow("invalid");
+  });
+
   it("makes one batched director call with LOW reasoning and validates returned NPC IDs", async () => {
     const generate = vi.fn<GeminiTransport["generateContent"]>(async () => response(directorReply));
     const service = createGeminiService(config, { generateContent: generate, connect: vi.fn() });
@@ -216,6 +225,20 @@ describe("Gemini response contracts and NPC authority", () => {
     await expect(service.dialogue(context(), "Hi", new AbortController().signal)).rejects.not.toThrow("secret-provider-details");
     expect(providerError({ status: 429 }).status).toBe(429);
     expect(generate).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    [400, "GEMINI_REQUEST"], [401, "GEMINI_AUTH"], [403, "GEMINI_AUTH"], [404, "GEMINI_MODEL"], [429, "GEMINI_QUOTA"], [503, "GEMINI_UNAVAILABLE"],
+  ])("preserves SDK HTTP %i classification without automatic retries", async (status, code) => {
+    const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(
+      JSON.stringify({ error: { code: status, message: "PRIVATE_PROVIDER_ERROR" } }),
+      { status, headers: { "Content-Type": "application/json" } },
+    ));
+    const service = createGeminiService(config);
+    const result = await service.dialogue(context(), "Hello.", new AbortController().signal).catch(error => error);
+    expect(result.code).toBe(code);
+    expect(result.message).not.toContain("PRIVATE_PROVIDER_ERROR");
+    expect(fetch).toHaveBeenCalledOnce();
   });
 
   it("converts PCM or WAV exactly once and caches TTS by text and voice", async () => {

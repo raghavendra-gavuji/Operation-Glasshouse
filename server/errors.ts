@@ -26,10 +26,13 @@ export function providerError(error: unknown): ServiceError {
   if (status === 404) {
     return new ServiceError(502, "GEMINI_MODEL", "The configured Gemini model is unavailable for this API. No substitute model was used.");
   }
+  if (status === 400) {
+    return new ServiceError(502, "GEMINI_REQUEST", "Gemini rejected the request format or configuration. Check the configured model and supported request schema.");
+  }
   if (status === 429) {
     return new ServiceError(429, "GEMINI_QUOTA", "Gemini's quota or rate limit was reached. Wait before explicitly trying again.", true);
   }
-  if (error instanceof Error && (error.name === "AbortError" || error.name === "TimeoutError")) {
+  if (status === 408 || status === 504 || (error instanceof Error && (error.name === "AbortError" || error.name === "TimeoutError"))) {
     return new ServiceError(504, "GEMINI_TIMEOUT", "The Gemini request timed out or was cancelled. You can continue using text or practice mode.", true);
   }
   return new ServiceError(502, "GEMINI_UNAVAILABLE", "The Gemini request failed. You can explicitly retry or continue in practice mode.", true);

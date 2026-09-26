@@ -148,3 +148,31 @@ export function jsonSchema(schema: z.ZodType): Record<string, unknown> {
   delete result.$schema;
   return result;
 }
+
+export function generationJsonSchema(schema: z.ZodType): Record<string, unknown> {
+  const object = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
+  const structuralKeys = new Set(["type", "title", "description", "enum", "required", "additionalProperties", "$ref"]);
+  function compact(value: Record<string, unknown>): Record<string, unknown> {
+    const result: Record<string, unknown> = {};
+    for (const [key, child] of Object.entries(value)) {
+      if (key === "const") result.enum = [child];
+      else if (key === "properties" || key === "$defs") {
+        if (!object(child)) throw new Error("Invalid generated schema definition.");
+        result[key] = Object.fromEntries(Object.entries(child).map(([name, definition]) => {
+          if (!object(definition)) throw new Error("Invalid generated schema property.");
+          return [name, compact(definition)];
+        }));
+      } else if (key === "items" && object(child)) result.items = compact(child);
+      else if ((key === "anyOf" || key === "oneOf") && Array.isArray(child)) {
+        result[key] = child.map(definition => {
+          if (!object(definition)) throw new Error("Invalid generated schema alternative.");
+          return compact(definition);
+        });
+      } else if (structuralKeys.has(key)) result[key] = child;
+    }
+    return result;
+  }
+  // Gemini rejects the bounded, nested response grammar with INVALID_ARGUMENT.
+  // Keep its structural contract compact; the full Zod schema still validates every reply.
+  return compact(jsonSchema(schema));
+}

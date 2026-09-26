@@ -10,7 +10,7 @@ import { invalidResponse, providerError, ServiceError } from "./errors";
 import {
   actionIsAllowed, conversationInstruction, directorInstruction, directorSnapshot,
 } from "./prompts";
-import { dialogueReplySchema, directorReplySchema, jsonSchema } from "./schemas";
+import { dialogueReplySchema, directorReplySchema, generationJsonSchema } from "./schemas";
 import { generatedAudioToWav } from "./wav";
 
 export type LiveSession = Pick<Session, "sendClientContent" | "sendRealtimeInput" | "sendToolResponse" | "close">;
@@ -90,8 +90,9 @@ export function createGeminiService(config: ServerConfig, injected?: GeminiTrans
     if (!config.apiKey) throw new ServiceError(503, "NOT_CONFIGURED", "GEMINI_API_KEY is not configured on the server. Text and voice generation are unavailable; practice mode remains available.");
     if (!transport) {
       const ai = new GoogleGenAI({
-        apiKey: config.apiKey,
-        httpOptions: { apiVersion: "v1beta", timeout: limits.ttsTimeoutMs, retryOptions: { attempts: 1 } },
+        apiKey: config.apiKey, vertexai: false,
+        // The default SDK transport makes one fetch; its opt-in retry wrapper loses HTTP error status.
+        httpOptions: { apiVersion: "v1beta", timeout: limits.ttsTimeoutMs },
       });
       transport = {
         generateContent: params => ai.models.generateContent(params),
@@ -110,7 +111,7 @@ export function createGeminiService(config: ServerConfig, injected?: GeminiTrans
         config: {
           abortSignal: signal, systemInstruction: instruction,
           thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
-          responseMimeType: "application/json", responseJsonSchema: jsonSchema(schema),
+          responseMimeType: "application/json", responseJsonSchema: generationJsonSchema(schema),
           maxOutputTokens: 4096, candidateCount: 1,
           httpOptions: { timeout: limits.requestTimeoutMs },
         },

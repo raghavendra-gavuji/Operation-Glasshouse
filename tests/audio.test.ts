@@ -64,7 +64,7 @@ class BrowserAudioContext {
 }
 class Worklet extends Node {
   static instances: Worklet[] = [];
-  port = { onmessage: null as ((event: { data: unknown }) => void) | null, postMessage: vi.fn() };
+  port = { onmessage: null as ((event: { data: unknown }) => void) | null, postMessage: vi.fn(), close: vi.fn() };
   onprocessorerror: (() => void) | null = null;
   constructor() { super(); Worklet.instances.push(this); }
   frame(data: unknown) { this.port.onmessage?.({ data }); }
@@ -212,6 +212,34 @@ describe("VoiceClient browser audio lifecycle", () => {
     await narration;
     expect(BrowserAudioContext.instances).toHaveLength(1);
     expect(audio.decodeAudioData).toHaveBeenCalledOnce();
+  });
+
+  it("allows an explicit microphone retry after denial without allocating a second AudioContext", async () => {
+    getUserMedia.mockRejectedValueOnce(new DOMException("Denied", "NotAllowedError"));
+    const voice = client();
+    await expect(voice.prepare()).rejects.toThrow("permission");
+    await voice.prepare();
+    expect(getUserMedia).toHaveBeenCalledTimes(2);
+    expect(BrowserAudioContext.instances).toHaveLength(1);
+    expect(BrowserAudioContext.instances[0].audioWorklet.addModule).toHaveBeenCalledOnce();
+    expect(voice.micEnabled).toBe(true);
+    expect(microphone.track.enabled).toBe(false);
+  });
+
+  it("reacquires an ended hardware track only after another explicit prepare call", async () => {
+    const voice = client();
+    await voice.prepare();
+    microphone.track.readyState = "ended";
+    microphone.track.onended?.();
+    expect(getUserMedia).toHaveBeenCalledOnce();
+    const replacement = new Stream();
+    getUserMedia.mockResolvedValueOnce(replacement);
+    await voice.prepare();
+    expect(getUserMedia).toHaveBeenCalledTimes(2);
+    expect(BrowserAudioContext.instances).toHaveLength(1);
+    expect(Worklet.instances[0].port.close).toHaveBeenCalledOnce();
+    expect(voice.micEnabled).toBe(true);
+    expect(replacement.track.enabled).toBe(false);
   });
 
   it("enables capture only after ready and disables it on mute, visibility and disconnect", async () => {

@@ -102,6 +102,7 @@ export class VoiceClient {
   private processor: AudioWorkletNode | null = null;
   private silentSink: GainNode | null = null;
   private preparePromise: Promise<void> | null = null;
+  private workletModule: Promise<void> | null = null;
   private mediaEpoch = 0;
   private muted = false;
   private volume = 1;
@@ -143,7 +144,10 @@ export class VoiceClient {
   prepare(): Promise<void> {
     if (this.disposed) return Promise.reject(new Error("This audio client has been disposed."));
     if (this.preparePromise) return this.preparePromise;
-    this.preparePromise = this.prepareAudio();
+    if (this.processor && this.microphone?.getAudioTracks().some(track => track.readyState === "live")) {
+      return this.audioContext?.state === "suspended" ? this.audioContext.resume() : Promise.resolve();
+    }
+    this.preparePromise = this.prepareAudio().finally(() => { this.preparePromise = null; });
     return this.preparePromise;
   }
 
@@ -151,16 +155,19 @@ export class VoiceClient {
     const epoch = ++this.mediaEpoch;
     try {
       if (!globalThis.AudioContext) throw new Error("Web Audio is unavailable in this browser.");
-      const audio = new AudioContext({ latencyHint: "interactive" });
-      this.audioContext = audio;
-      this.output = audio.createGain();
-      this.output.gain.value = this.volume;
-      this.output.connect(audio.destination);
-      // Creation, resume and a silent source happen inside the initial Start gesture.
+      this.releaseMicrophone();
+      const audio = this.audioContext ?? new AudioContext({ latencyHint: "interactive" });
+      if (!this.audioContext) {
+        this.audioContext = audio;
+        this.output = audio.createGain();
+        this.output.gain.value = this.volume;
+        this.output.connect(audio.destination);
+      }
+      // Unlock only inside an explicit Start or Retry Microphone gesture.
       const resume = audio.resume();
       const unlock = audio.createBufferSource();
       unlock.buffer = audio.createBuffer(1, 1, audio.sampleRate);
-      unlock.connect(this.output);
+      unlock.connect(this.output!);
       unlock.onended = () => unlock.disconnect();
       unlock.start();
       const request = navigator.mediaDevices?.getUserMedia({
@@ -178,7 +185,13 @@ export class VoiceClient {
       }, error => ({ error }));
       await resume;
       if (!audio.audioWorklet || !globalThis.AudioWorkletNode) throw new Error("AudioWorklet is not supported.");
-      await audio.audioWorklet.addModule("/pcm-processor.js");
+      if (!this.workletModule) {
+        this.workletModule = audio.audioWorklet.addModule("/pcm-processor.js").catch(error => {
+          this.workletModule = null;
+          throw error;
+        });
+      }
+      await this.workletModule;
       const result = await media;
       if ("error" in result) throw result.error;
       if (this.disposed || epoch !== this.mediaEpoch) throw cancelled();
@@ -205,14 +218,14 @@ export class VoiceClient {
         };
       }
       this.refreshCapture();
-      this.setStatus("idle");
+      this.setStatus(this.active ? (this.sources.size ? "speaking" : "listening") : this.pendingConnection ? "connecting" : "idle");
     } catch (error) {
       this.mediaEpoch++;
       this.releaseMicrophone();
       if (this.disposed || isCancelled(error)) throw cancelled();
       const message = microphoneError(error);
       this.report(message);
-      this.setStatus("error");
+      this.setStatus(this.active ? (this.sources.size ? "speaking" : "listening") : "error");
       throw new Error(message);
     }
   }
@@ -653,23 +666,23 @@ export class VoiceClient {
     try {
       context.drawImage(video, 0, 0, canvas.width, canvas.height);
       canvas.toBlob(blob => {
-      void (async () => {
-        try {
-          if (!blob) throw new Error("Camera frame encoding failed.");
-          if (blob.size > 196_608) throw new Error("Camera frame exceeds the size limit.");
-          const bytes = await blob.arrayBuffer();
-          if (this.active && epoch === this.cameraEpoch && connection === this.connectionEpoch && !document.hidden) {
-            this.send({ type: "video", data: encodeBase64(new Uint8Array(bytes)) });
+        void (async () => {
+          try {
+            if (!blob) throw new Error("Camera frame encoding failed.");
+            if (blob.size > 196_608) throw new Error("Camera frame exceeds the size limit.");
+            const bytes = await blob.arrayBuffer();
+            if (this.active && epoch === this.cameraEpoch && connection === this.connectionEpoch && !document.hidden) {
+              this.send({ type: "video", data: encodeBase64(new Uint8Array(bytes)) });
+            }
+          } catch {
+            if (epoch === this.cameraEpoch) {
+              this.releaseCamera();
+              this.report("Optional camera streaming stopped because a frame could not be processed.");
+            }
+          } finally {
+            if (epoch === this.cameraEpoch) this.cameraFrameBusy = false;
           }
-        } catch {
-          if (epoch === this.cameraEpoch) {
-            this.releaseCamera();
-            this.report("Optional camera streaming stopped because a frame could not be processed.");
-          }
-        } finally {
-          if (epoch === this.cameraEpoch) this.cameraFrameBusy = false;
-        }
-      })();
+        })();
       }, "image/jpeg", 0.65);
     } catch {
       this.releaseCamera();
@@ -699,7 +712,11 @@ export class VoiceClient {
   private releaseMicrophone(): void {
     this.captureActive = false;
     this.processor?.port.postMessage({ type: "dispose" });
-    if (this.processor) this.processor.port.onmessage = null;
+    if (this.processor) {
+      this.processor.port.onmessage = null;
+      this.processor.port.close();
+      this.processor.onprocessorerror = null;
+    }
     this.processor?.disconnect();
     this.microphoneSource?.disconnect();
     this.silentSink?.disconnect();
